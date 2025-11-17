@@ -15,3 +15,5 @@ final_plots/
 run_mrx.sh.*
 raw_particle_data/
 helloworld.sh.*
+extracted_data/
+extracted_psd_data_moments/
