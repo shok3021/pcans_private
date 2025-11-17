@@ -7,7 +7,6 @@ from scipy.integrate import cumtrapz
 # =======================================================
 # ヘルパー関数 (load_simulation_parameters, load_2d_field_data, etc.)
 # =======================================================
-# (前回のコードから変更なし)
 
 def load_simulation_parameters(param_filepath):
     """
@@ -109,7 +108,7 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'final_plots')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # --- init_param.dat のパスを指定 ---
-PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
+PARAM_FILE_PATH = os.path.join('/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
 
 # --- パラメータの読み込みと di の計算 ---
 C_LIGHT, FPI, DT, FGI, VA0, MI, QI = load_simulation_parameters(PARAM_FILE_PATH)
