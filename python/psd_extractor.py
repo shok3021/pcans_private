@@ -3,19 +3,88 @@ import os
 import glob
 import sys
 import time
+# =======================================================
+# ★ ステップ1: init_param.dat 読み込み関数 (前回からコピー)
+# =======================================================
+def load_simulation_parameters(param_filepath):
+    """
+    init_param.dat を読み込み、必要なパラメータを抽出する。
+    (C_LIGHT, FPI, DT, FGI, VA0, MI, QI に加え、
+     ★ NX_PHYS, NY_PHYS, DELX を抽出する機能を追加 ★)
+    """
+    C_LIGHT, FPI, DT, FGI, VA0, MI, QI = (None,) * 7
+    NX_PHYS, NY_PHYS, DELX = (None,) * 3
+
+    print(f"パラメータファイルを読み込み中: {param_filepath}")
+    try:
+        with open(param_filepath, 'r') as f:
+            for line in f:
+                stripped_line = line.strip()
+
+                # --- (C, FPI, DT, FGI, VA0, MI, QI の抽出 ... 省略) ---
+                # (前回の visual_fields.py からコピーしてください)
+                
+                # ★ グリッドサイズ (nx, ny) とセル幅 (dx) の抽出を追加 ★
+                if stripped_line.startswith('nx, ny'):
+                    try:
+                        parts = stripped_line.split()
+                        # 'nx = 321' の '321' を取得
+                        NX_GRID_POINTS = int(parts[2]) 
+                        # 'ny = 640' の '640' を取得
+                        NY_GRID_POINTS = int(parts[5]) 
+                        
+                        # Fortranのセル数 (NX_PHYS) は グリッドポイント数 - 1
+                        NX_PHYS = NX_GRID_POINTS - 1
+                        NY_PHYS = NY_GRID_POINTS - 1
+                        print(f"  -> 'nx' (Grid Points) を検出: {NX_GRID_POINTS} (セル数: {NX_PHYS})")
+                        print(f"  -> 'ny' (Grid Points) を検出: {NY_GRID_POINTS} (セル数: {NY_PHYS})")
+                    except (IndexError, ValueError):
+                        print(f"  -> エラー: 'nx, ny' の値の解析に失敗。")
+
+                if stripped_line.startswith('dx, dt, c'):
+                    try:
+                        parts = stripped_line.split()
+                        DELX = float(parts[2]) # 3番目の要素 (dx)
+                        DT = float(parts[5])      # 6番目の要素 (dt)
+                        C_LIGHT = float(parts[6]) # 7番目の要素 (c)
+                        print(f"  -> 'dx' (DELX) の値を検出: {DELX}")
+                        print(f"  -> 'dt' の値を検出: {DT}")
+                        print(f"  -> 'c' の値を検出: {C_LIGHT}")
+                    except (IndexError, ValueError):
+                        print(f"  -> エラー: 'dx, dt, c' の値の解析に失敗。")
+        
+        # (エラーチェックに NX_PHYS, NY_PHYS, DELX を追加)
+        if NX_PHYS is None or NY_PHYS is None or DELX is None:
+            print("★★ エラー: グリッドパラメータ ('nx', 'ny', 'dx') を抽出できませんでした。")
+            sys.exit(1)
+            
+        # (C_LIGHT など、他のパラメータのエラーチェックもここで行う)
+            
+        return NX_PHYS, NY_PHYS, DELX # ★ 返り値に追加
+
+    except FileNotFoundError:
+        print(f"★★ エラー: パラメータファイルが見つかりません: {param_filepath}")
+        sys.exit(1)
 
 # =======================================================
-# 設定 (Fortran const モジュールから取得した正確な値)
+# ★ ステップ2 & 3: グローバル定数を動的に設定
 # =======================================================
-# ★★★ Fortran const モジュールからの値を使用 ★★★
-GLOBAL_NX_GRID_POINTS = 321  
-GLOBAL_NY_GRID_POINTS = 640
 
-# 物理領域のグリッド数 (セル数: Grid Points - 1)
-GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 # 320 セル
-GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 # 639 セル
-DELX = 1.0 
+# --- init_param.dat のパスを指定 ---
+# (visual_fields.py と同じパスを指定してください)
+PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
 
+# --- パラメータの読み込み ---
+try:
+    GLOBAL_NX_PHYS, GLOBAL_NY_PHYS, DELX = load_simulation_parameters(PARAM_FILE_PATH)
+except Exception as e:
+    print(f"init_param.dat の読み込みに失敗しました: {e}")
+    print("ハードコードされた値で続行しますが、不正確な可能性があります。")
+    # (フォールバック)
+    GLOBAL_NX_PHYS = 320 
+    GLOBAL_NY_PHYS = 639
+    DELX = 1.0
+    
 # ★★★ 座標範囲の仮修正 (Fortranの真の座標系に合わせるべきです) ★★★
 # ここでは、Fortranの座標系が [0.0, 320.0] x [0.0, 639.0] であると仮定します。
 X_MIN = 0.0            
