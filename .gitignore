@@ -10,7 +10,6 @@ dat/*.dat
 !dat/energy.dat
 mom/
 md_mrx/psd/
-final_plots/
 *.log
 run_mrx.sh.*
 raw_particle_data/
