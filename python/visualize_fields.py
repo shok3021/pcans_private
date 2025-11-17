@@ -109,7 +109,7 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'final_plots')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # --- init_param.dat のパスを指定 ---
-PARAM_FILE_PATH = os.path.join('/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
+PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
 
 # --- パラメータの読み込みと di の計算 ---
 C_LIGHT, FPI, DT, FGI, VA0, MI, QI = load_simulation_parameters(PARAM_FILE_PATH)
@@ -248,22 +248,43 @@ def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu
     ax.tick_params(direction='in', top=True, right=True)
 
 def plot_combined(ax, X, Y, Z, Bx, By, title, label, cmap='RdBu_r', vmin=None, vmax=None, stream_color='gray', stream_density=1.0):
-    if vmin is None: vmin = Z.min()
-    if vmax is None: vmax = Z.max()
+    if vmin is None: vmin, vmax = get_plot_range(Z) # ゼロ対応
+    if vmax is None: vmin, vmax = get_plot_range(Z) # ゼロ対応
+        
     levels = np.linspace(vmin, vmax, 100)
+    
+    # nanを特定の色 (例: 'lightgray') でマスクする
     cf = ax.contourf(X, Y, Z, levels=levels, cmap=cmap, extend='both')
+
+    # --- ★ ユーザーの要望によりカラーバーを追加 ★ ---
+    # カラーバーのフォーマットを調整
+    formatter_str = '%.2f'
+    if (vmax > 0 and np.abs(vmax) < 0.01) or np.abs(vmax) > 100:
+         formatter_str = '%.1e'
+         
+    # 統合パネル用にカラーバーを小さく設定 (shrink, aspect, pad)
+    cbar = plt.colorbar(cf, ax=ax, format=formatter_str, 
+                        shrink=0.9, aspect=30, pad=0.02)
+    
+    # ラベルと目盛りのフォントサイズも小さくする
+    cbar.set_label(label, fontsize=7)
+    cbar.ax.tick_params(labelsize=6)
+    # --- ★★★★★★★★★★★★★★★★★★★★★★★ ---
+
     stride_x = max(1, Bx.shape[1] // 15)
     stride_y = max(1, Bx.shape[0] // 15)
+    
     ax.streamplot(X[::stride_y, ::stride_x], Y[::stride_y, ::stride_x], 
                   Bx[::stride_y, ::stride_x], By[::stride_y, ::stride_x], 
                   color=stream_color, linewidth=0.5, density=stream_density, 
                   arrowstyle='-', minlength=0.1, zorder=1)
+                  
     ax.set_title(title, fontsize=10)
     ax.set_xlabel('$x/d_i$', fontsize=8)
     ax.set_ylabel('$y/d_i$', fontsize=8)
     ax.tick_params(direction='in', top=True, right=True, labelsize=7)
+    
     return cf
-
 # =======================================================
 # ★★★ メイン実行関数 (単一ステップ処理用) ★★★
 # =======================================================
@@ -445,8 +466,8 @@ def process_timestep(timestep):
         else:
             break
 
-    fig.tight_layout(rect=[0, 0.03, 1, 0.97]) 
-    output_filename_combined = os.path.join(OUTPUT_DIR, f'allcombined/plot_combined_{timestep}.png')
+    fig.tight_layout(rect=[0, 0.03, 1, 0.97], h_pad=1.5, w_pad=0.5)
+    output_filename_combined = os.path.join(OUTPUT_DIR, 'allcombined', f'plot_combined_{timestep}.png')
     plt.savefig(output_filename_combined, dpi=300)
     plt.close(fig)
     print(f"-> 全てを含む統合パネル (5x4) を {output_filename_combined} に保存しました。")
