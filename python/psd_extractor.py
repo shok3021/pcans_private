@@ -3,114 +3,117 @@ import os
 import glob
 import sys
 import time
+
 # =======================================================
-# ★ ステップ1: init_param.dat 読み込み関数 (前回からコピー)
+# ★ ステップ1: init_param.dat 読み込み関数 (新形式パーサー)
 # =======================================================
 def load_simulation_parameters(param_filepath):
     """
-    init_param.dat を読み込み、必要なパラメータを抽出する。
-    (C_LIGHT, FPI, DT, FGI, VA0, MI, QI に加え、
-     ★ NX_PHYS, NY_PHYS, DELX を抽出する機能を追加 ★)
+    init_param.dat (key ====> value 形式) を読み込む。
     """
-    C_LIGHT, FPI, DT, FGI, VA0, MI, QI = (None,) * 7
-    NX_PHYS, NY_PHYS, DELX = (None,) * 3
-
+    params = {}
     print(f"パラメータファイルを読み込み中: {param_filepath}")
+
     try:
         with open(param_filepath, 'r') as f:
             for line in f:
-                stripped_line = line.strip()
+                if "====>" in line:
+                    parts = line.split("====>")
+                    key_part = parts[0].strip()
+                    value_part = parts[1].strip()
+                    
+                    # 値を 'x' や空白で分割
+                    value_part = value_part.replace('x', ' ')
+                    values = value_part.split()
+                    
+                    if not values:
+                        continue
 
-                # --- (C, FPI, DT, FGI, VA0, MI, QI の抽出 ... 省略) ---
-                # (前回の visual_fields.py からコピーしてください)
-                
-                # ★ グリッドサイズ (nx, ny) とセル幅 (dx) の抽出を追加 ★
-                if stripped_line.startswith('nx, ny'):
-                    try:
-                        parts = stripped_line.split()
-                        # 'nx = 321' の '321' を取得
-                        NX_GRID_POINTS = int(parts[2]) 
-                        # 'ny = 640' の '640' を取得
-                        NY_GRID_POINTS = int(parts[5]) 
-                        
-                        # Fortranのセル数 (NX_PHYS) は グリッドポイント数 - 1
-                        NX_PHYS = NX_GRID_POINTS - 1
-                        NY_PHYS = NY_GRID_POINTS - 1
-                        print(f"  -> 'nx' (Grid Points) を検出: {NX_GRID_POINTS} (セル数: {NX_PHYS})")
-                        print(f"  -> 'ny' (Grid Points) を検出: {NY_GRID_POINTS} (セル数: {NY_PHYS})")
-                    except (IndexError, ValueError):
-                        print(f"  -> エラー: 'nx, ny' の値の解析に失敗。")
-
-                if stripped_line.startswith('dx, dt, c'):
-                    try:
-                        parts = stripped_line.split()
-                        DELX = float(parts[2]) # 3番目の要素 (dx)
-                        DT = float(parts[5])      # 6番目の要素 (dt)
-                        C_LIGHT = float(parts[6]) # 7番目の要素 (c)
-                        print(f"  -> 'dx' (DELX) の値を検出: {DELX}")
-                        print(f"  -> 'dt' の値を検出: {DT}")
-                        print(f"  -> 'c' の値を検出: {C_LIGHT}")
-                    except (IndexError, ValueError):
-                        print(f"  -> エラー: 'dx, dt, c' の値の解析に失敗。")
-        
-        # (エラーチェックに NX_PHYS, NY_PHYS, DELX を追加)
-        if NX_PHYS is None or NY_PHYS is None or DELX is None:
-            print("★★ エラー: グリッドパラメータ ('nx', 'ny', 'dx') を抽出できませんでした。")
-            sys.exit(1)
-            
-        # (C_LIGHT など、他のパラメータのエラーチェックもここで行う)
-            
-        return NX_PHYS, NY_PHYS, DELX # ★ 返り値に追加
+                    # キーに基づいて値をマッピング
+                    if key_part.startswith('grid size'):
+                        params['NX_GRID_POINTS'] = int(values[0]) # 321
+                        params['NY_GRID_POINTS'] = int(values[1]) # 640
+                    
+                    elif key_part.startswith('dx, dt, c'):
+                        params['DELX'] = float(values[0])    # 1.0000
+                        params['DT'] = float(values[1])      # 0.5000
+                        params['C_LIGHT'] = float(values[2]) # 1.0000
+                    
+                    elif key_part.startswith('Mi, Me'):
+                        params['MI'] = float(values[0])      # 1.60E+01
+                    
+                    elif key_part.startswith('Qi, Qe'):
+                        params['QI'] = float(values[0])      # 2.82E-03
+                    
+                    elif key_part.startswith('Fpe, Fge, Fpi Fgi'):
+                        params['FPI'] = float(values[2])     # 3.95E-02
+                        params['FGI'] = float(values[3])     # 4.94E-03
+                    
+                    elif key_part.startswith('Va, Vi, Ve'):
+                        params['VA0'] = float(values[0])     # 1.25E-01
 
     except FileNotFoundError:
         print(f"★★ エラー: パラメータファイルが見つかりません: {param_filepath}")
         sys.exit(1)
+        
+    # 必須パラメータのチェック
+    required_keys = ['NX_GRID_POINTS', 'NY_GRID_POINTS', 'DELX']
+    if not all(key in params for key in required_keys):
+        print("★★ エラー: 必要なパラメータ ('grid size', 'dx') を抽出できませんでした。")
+        sys.exit(1)
+        
+    # セル数を計算 (Grid Points - 1)
+    params['NX_PHYS'] = params['NX_GRID_POINTS'] - 1
+    params['NY_PHYS'] = params['NY_GRID_POINTS'] - 1
+        
+    return params
 
 # =======================================================
-# ★ ステップ2 & 3: グローバル定数を動的に設定
+# ★ ステップ2: グローバル定数を動的に設定
 # =======================================================
 
 # --- init_param.dat のパスを指定 ---
-# (visual_fields.py と同じパスを指定してください)
 PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
 
 # --- パラメータの読み込み ---
 try:
-    GLOBAL_NX_PHYS, GLOBAL_NY_PHYS, DELX = load_simulation_parameters(PARAM_FILE_PATH)
+    sim_params = load_simulation_parameters(PARAM_FILE_PATH)
+    GLOBAL_NX_PHYS = sim_params['NX_PHYS'] # 320
+    GLOBAL_NY_PHYS = sim_params['NY_PHYS'] # 639
+    DELX = sim_params['DELX']              # 1.0
 except Exception as e:
     print(f"init_param.dat の読み込みに失敗しました: {e}")
-    print("ハードコードされた値で続行しますが、不正確な可能性があります。")
-    # (フォールバック)
-    GLOBAL_NX_PHYS = 320 
-    GLOBAL_NY_PHYS = 639
-    DELX = 1.0
-    
-# ★★★ 座標範囲の仮修正 (Fortranの真の座標系に合わせるべきです) ★★★
-# ここでは、Fortranの座標系が [0.0, 320.0] x [0.0, 639.0] であると仮定します。
-X_MIN = 0.0            
-X_MAX = GLOBAL_NX_PHYS * DELX 
-Y_MIN = 0.0            
-Y_MAX = GLOBAL_NY_PHYS * DELX
-
-print(f"--- グリッド設定 (修正案) ---")
-print(f"X方向物理セル数: {GLOBAL_NX_PHYS}, Y方向物理セル数: {GLOBAL_NY_PHYS}")
-print(f"空間範囲: X=[{X_MIN}, {X_MAX}], Y=[{Y_MIN}, {Y_MAX}] (セル幅: {DELX})")
+    print("スクリプトを終了します。")
+    sys.exit(1)
 
 # =======================================================
-# データ抽出・計算関数 (GLOBAL定数を更新)
+# ★ ステップ3: 座標範囲を X-Center で動的に設定
+# =======================================================
+# (visual_fields.py と同じ座標系を仮定)
+X_MIN = -GLOBAL_NX_PHYS * DELX / 2.0  # -> -160.0
+X_MAX = GLOBAL_NX_PHYS * DELX / 2.0   # ->  160.0
+Y_MIN = 0.0                           # ->    0.0
+Y_MAX = GLOBAL_NY_PHYS * DELX         # ->  639.0
+
+print(f"--- グリッド設定 (動的読込) ---")
+print(f"X方向物理セル数: {GLOBAL_NX_PHYS}, Y方向物理セル数: {GLOBAL_NY_PHYS}")
+print(f"★ 修正後の空間範囲: X=[{X_MIN}, {X_MAX}], Y=[{Y_MIN}, {Y_MAX}] (セル幅: {DELX})")
+
+# =======================================================
+# データ抽出・計算関数 (calculate_moments_from_particle_list)
 # =======================================================
 def calculate_moments_from_particle_list(particle_data):
     """
-    粒子の生データ (X, Y, Vx, Vy, Vz) から空間グリッド上の平均速度を計算する。
+    粒子の生データから空間グリッド上の平均速度を計算する。
+    (この関数は、動的に設定されたグローバル変数 NX, NY, X_MIN, X_MAX などを使用します)
     """
     
+    # グローバル変数を使用
     NX = GLOBAL_NX_PHYS
     NY = GLOBAL_NY_PHYS
-    
-    # 空間グリッドの範囲
     x_min, x_max = X_MIN, X_MAX
     y_min, y_max = Y_MIN, Y_MAX 
-
+    
     # 粒子データの各列
     X_pos = particle_data[:, 0]
     Y_pos = particle_data[:, 1]
@@ -121,24 +124,23 @@ def calculate_moments_from_particle_list(particle_data):
     N_total = len(X_pos) # 全粒子数
 
     # --- インデックス計算 ---
-    
-    # N 個のセルを区切る N+1 個の境界 (x_min, ..., x_max) を生成
+    # (linspace, digitize, clip のロジックは変更なし)
     x_bins = np.linspace(x_min, x_max, NX + 1)
     y_bins = np.linspace(y_min, y_max, NY + 1)
 
-    # np.digitizeでインデックスを計算
     bin_x = np.digitize(X_pos, x_bins)
     bin_y = np.digitize(Y_pos, y_bins)
 
-    # 物理セルインデックス (0 <= index < N) にクリップ
     ix = np.clip(bin_x - 1, 0, NX - 1)
     iy = np.clip(bin_y - 1, 0, NY - 1)
 
-    # 粒子が空間グリッド範囲内にあるかのマスクを作成
+    # ★★★
+    # ここが重要：X_pos の範囲 (例: -160 から +160) と
+    # x_min, x_max の範囲 (今 -160 から +160 に修正) が一致する
+    # ★★★
     mask = (X_pos >= x_min) & (X_pos <= x_max) & \
            (Y_pos >= y_min) & (Y_pos <= y_max)
            
-    # 修正後のインデックスと粒子データにマスクを適用
     ix_masked = ix[mask]
     iy_masked = iy[mask]
     vx_masked = Vx_raw[mask]
@@ -147,77 +149,83 @@ def calculate_moments_from_particle_list(particle_data):
     
     N_masked = len(ix_masked)
     
-    # =======================================================
-    # ★★★ デバッグ出力の追加 ★★★
-    # =======================================================
+    # (デバッグ出力)
     print("  --- デバッグ情報 ---")
     print(f"  X-Range (設定): [{x_min}, {x_max}], Y-Range (設定): [{y_min}, {y_max}]")
-    print(f"  X-pos min/max (粒子): {np.min(X_pos):.3f} / {np.max(X_pos):.3f}")
-    print(f"  Y-pos min/max (粒子): {np.min(Y_pos):.3f} / {np.max(Y_pos):.3f}")
+    if N_total > 0:
+        print(f"  X-pos min/max (粒子): {np.min(X_pos):.3f} / {np.max(X_pos):.3f}")
+        print(f"  Y-pos min/max (粒子): {np.min(Y_pos):.3f} / {np.max(Y_pos):.3f}")
     print(f"  全粒子数: {N_total}, マスクされた粒子数 (集計対象): {N_masked}")
     
     if N_masked == 0:
-        print("  -> **致命的警告: マスクされた粒子がゼロです。グリッド範囲と粒子座標が一致していません。**")
-        # 0の配列を返して処理を継続
+        if N_total > 0:
+            print("  -> **致命的警告: マスクされた粒子がゼロです。グリッド範囲と粒子座標が一致していません。**")
         density = np.zeros((NY, NX))
         vx_sum = np.zeros((NY, NX))
         vy_sum = np.zeros((NY, NX))
         vz_sum = np.zeros((NY, NX))
     else:
-        # マスクされた粒子のインデックスの最小値と最大値
-        print(f"  IX_masked min/max: {np.min(ix_masked)} / {np.max(ix_masked)} (NX={NX})")
-        print(f"  IY_masked min/max: {np.min(iy_masked)} / {np.max(iy_masked)} (NY={NY})")
-        
-        # 空間グリッド (NY, NX) を作成
+        # (集計処理 ... 変更なし)
+        # ...
         density = np.zeros((NY, NX))
         vx_sum = np.zeros((NY, NX))
         vy_sum = np.zeros((NY, NX))
         vz_sum = np.zeros((NY, NX))
         
-        # 各粒子を対応するグリッドセルに集計 (ベクトル化)
         np.add.at(density, (iy_masked, ix_masked), 1)
         np.add.at(vx_sum, (iy_masked, ix_masked), vx_masked)
         np.add.at(vy_sum, (iy_masked, ix_masked), vy_masked)
         np.add.at(vz_sum, (iy_masked, ix_masked), vz_masked)
+
     
-    # 平均速度を計算 (ゼロ除算回避)
     density_safe = np.where(density > 0, density, 1e-12)
-    
     average_vx = vx_sum / density_safe
     average_vy = vy_sum / density_safe
     average_vz = vz_sum / density_safe
     
+    # 粒子が0だったセルは 0.0 に戻す
+    average_vx[density == 0] = 0.0
+    average_vy[density == 0] = 0.0
+    average_vz[density == 0] = 0.0
+    
     return density, average_vx, average_vy, average_vz
 
-# --- (load_text_data および save_data_to_txt 関数は変更なし) ---
+# =======================================================
+# (load_text_data, save_data_to_txt, main 関数は変更なし)
+# =======================================================
+
 def load_text_data(filepath):
-    # ... (変更なし)
+    # (変更なし)
     if not os.path.exists(filepath):
+        print(f"    エラー: ファイルが見つかりません: {filepath}")
         return None
         
     try:
         data = np.loadtxt(filepath)
         if data.ndim == 1:
+            if data.size == 0:
+                 print("    -> ファイルは空です。")
+                 return np.array([]) # 空の配列を返す
             data = data.reshape(1, -1)
+        if data.size == 0:
+            print("    -> ファイルは空です。")
+            return np.array([])
         return data
     except Exception as e:
         print(f"    エラー: {filepath} のテキスト読み込みに失敗: {e}")
         return None
 
 def save_data_to_txt(data_2d, label, timestep, species, out_dir, filename):
-    # ... (変更なし)
+    # (変更なし)
     output_file = os.path.join(out_dir, f'data_{timestep}_{species}_{filename}.txt')
     np.savetxt(output_file, data_2d, fmt='%.10e', delimiter=',') 
     print(f"-> {species}の {label} データを {output_file} に保存しました。")
 
 
-# =======================================================
-# メイン処理
-# =======================================================
 def main():
     if len(sys.argv) < 4:
         print("使用方法: python psd_extractor_revised.py [開始のステップ] [終了のステップ] [間隔]")
-        print("例: python psd_extractor_revised.py 000000 014000 500")
+        print("例: python psd_extractor_revised.py 0 14000 500")
         sys.exit(1)
         
     try:
@@ -230,9 +238,15 @@ def main():
         
     print(f"--- 処理範囲: 開始={start_step}, 終了={end_step}, 間隔={step_size} ---")
     
+    # ★ init_param.dat と同じ場所にある psd データを指定
     data_dir = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/psd/')
     
-    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    # ★ SCRIPT_DIR の定義を修正 (Jupyterなどでの実行にも対応)
+    try:
+        SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        SCRIPT_DIR = os.path.abspath('.') # (Jupyterなどでの実行用)
+
     OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_psd_data_moments') 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     print(f"--- 出力先ディレクトリ: {OUTPUT_DIR} ---")
@@ -248,6 +262,7 @@ def main():
 
         for suffix, species_label in species_list:
             
+            # (ファイル名はハードコードされた '0160-0320' を使用)
             filename = f'{timestep}_0160-0320_psd_{suffix}.dat'
             filepath = os.path.join(data_dir, filename)
             
@@ -262,14 +277,6 @@ def main():
             print(f"  -> {len(particle_data)} 個の粒子を読み込みました。モーメントを計算中...")
 
             # --- 1. 粒子データからモーメント (平均速度) を計算し、空間グリッドにマップ ---
-            # 粒子データの各列
-            X_pos = particle_data[:, 0]
-            Y_pos = particle_data[:, 1]
-            Vx_raw = particle_data[:, 2]
-            Vy_raw = particle_data[:, 3]
-            Vz_raw = particle_data[:, 4]
-
-            # calculate_moments_from_particle_list の実行
             density, average_vx, average_vy, average_vz = calculate_moments_from_particle_list(particle_data)
             
             # --- 2. 各物理量をテキストファイルに保存 ---
