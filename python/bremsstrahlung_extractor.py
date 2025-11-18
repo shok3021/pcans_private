@@ -3,16 +3,14 @@ import os
 import glob
 import sys
 import time
-# import fnmatch # ★ 不要なため削除
 from scipy.constants import m_e, c, elementary_charge 
 
 # =======================================================
-# ★ ステップ1: 物理定数とエネルギービンの定義 (★ ご要望のビンに更新)
+# ★ ステップ1: 物理定数とエネルギービンの定義
 # =======================================================
 KEV_TO_J = 1000.0 * elementary_charge
 
 # ★ ご要望に合わせてエネルギービン (keV) を更新
-# (15-20keVが抜けていたため補完しました。不要な範囲は削除してください)
 ENERGY_BINS_KEV = [
     (1.0, 5.0,   '01keV_05keV'),
     (5.0, 10.0,  '05keV_10keV'),
@@ -20,11 +18,8 @@ ENERGY_BINS_KEV = [
     (15.0, 20.0, '15keV_20keV'), # (10-15 と 20-25 の間を補完)
     (20.0, 25.0, '20keV_25keV'),
     (25.0, 30.0, '25keV_30keV'),
-    (30.0, 35.0, '30keV_35keV'),
-    (35.0, 40.0, '35keV_40keV'),
-    (40.0, 45.0, '40keV_45keV'),
-    (45.0, 50.0, '45keV_50keV'),
-    (50.0, 500.0, '50keV_over') # 50keV以上 (上限は適当に設定)
+    # (以下、必要に応じて 5keV ごとにビニングを追加してください)
+    (30.0, 500.0, '30keV_over') # 30keV以上 (上限は適当に設定)
 ]
 
 print("--- エネルギービン設定 (更新版) ---")
@@ -32,98 +27,58 @@ for e_min, e_max, label in ENERGY_BINS_KEV:
     print(f"  {label}: [{e_min}, {e_max}) keV")
 print("---------------------------------")
 
-# =======================================================
-# ★ ステップ2: init_param.dat 読み込み関数 (★ '=>' に修正)
-# =======================================================
-def load_simulation_parameters(param_filepath):
-    """
-    (psd_extractor_revised.py に合わせて '=>' を使用)
-    """
-    params = {}
-    print(f"パラメータファイルを読み込み中: {param_filepath}")
-
-    try:
-        with open(param_filepath, 'r') as f:
-            for line in f:
-                if "=>" in line: # ★ '====>' から '=>' に変更
-                    parts = line.split("=>") # ★ '====>' から '=>' に変更
-                    key_part = parts[0].strip()
-                    value_part = parts[1].strip()
-                    value_part = value_part.replace('x', ' ')
-                    values = value_part.split()
-                    if not values:
-                        continue
-                    if key_part.startswith('grid size'):
-                        params['NX_GRID_POINTS'] = int(values[0]) 
-                        params['NY_GRID_POINTS'] = int(values[1])
-                    elif key_part.startswith('dx, dt, c'):
-                        params['DELX'] = float(values[0])
-                        # (他のパラメータ読み込みは省略)
-
-    except FileNotFoundError:
-        print(f"★★ エラー: パラメータファイルが見つかりません: {param_filepath}")
-        sys.exit(1)
-        
-    required_keys = ['NX_GRID_POINTS', 'NY_GRID_POINTS', 'DELX']
-    if not all(key in params for key in required_keys):
-        print("★★ エラー: 必要なパラメータ ('grid size', 'dx') を抽出できませんでした。")
-        sys.exit(1)
-        
-    params['NX_PHYS'] = params['NX_GRID_POINTS'] - 1
-    params['NY_PHYS'] = params['NY_GRID_POINTS'] - 1
-        
-    return params
 
 # =======================================================
-# ★ ステップ3: グローバル定数を動的に設定
+# ★ ステップ2: グローバル定数を設定 (★ 座標系を [0, 320] に修正)
 # =======================================================
-# (変更なし)
-PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
+# (ご提示いただいた psd_extractor_revised.py の定義に合わせる)
+GLOBAL_NX_GRID_POINTS = 321
+GLOBAL_NY_GRID_POINTS = 640
 
-try:
-    sim_params = load_simulation_parameters(PARAM_FILE_PATH)
-    GLOBAL_NX_PHYS = sim_params['NX_PHYS'] # 320
-    GLOBAL_NY_PHYS = sim_params['NY_PHYS'] # 639
-    DELX = sim_params['DELX']              # 1.0
-except Exception as e:
-    print(f"init_param.dat の読み込みに失敗しました: {e}")
-    print("スクリプトを終了します。")
-    sys.exit(1)
+# 物理領域のグリッド数 (セル数: Grid Points - 1)
+GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 # 320 セル
+GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 # 639 セル
+DELX = 1.0
 
-# =======================================================
-# ★ ステップ4: 座標範囲を X-Center で動的に設定
-# =======================================================
-# (変更なし)
-X_MIN = -GLOBAL_NX_PHYS * DELX / 2.0  # -> -160.0
-X_MAX = GLOBAL_NX_PHYS * DELX / 2.0   # ->  160.0
-Y_MIN = 0.0                           # ->    0.0
-Y_MAX = GLOBAL_NY_PHYS * DELX         # ->  639.0
+# ★★★ 座標範囲を [0, 320] x [0, 639] に修正 ★★★
+X_MIN = 0.0
+X_MAX = GLOBAL_NX_PHYS * DELX # 320.0
+Y_MIN = 0.0
+Y_MAX = GLOBAL_NY_PHYS * DELX # 639.0
 
-print(f"--- グリッド設定 (動的読込) ---")
+print(f"--- グリッド設定 (修正版) ---")
 print(f"X方向物理セル数: {GLOBAL_NX_PHYS}, Y方向物理セル数: {GLOBAL_NY_PHYS}")
 print(f"★ 空間範囲: X=[{X_MIN}, {X_MAX}], Y=[{Y_MIN}, {Y_MAX}] (セル幅: {DELX})")
 
+
 # =======================================================
-# ★ ステップ5: 抽出・計算関数 (★ デバッグ出力追加)
+# ★ ステップ3: 抽出・計算関数 (エネルギービン別カウント)
 # =======================================================
 def calculate_xray_proxy_binned(particle_data):
     """
-    (デバッグ出力を psd_extractor_revised.py から移植)
+    粒子の生データからエネルギーを計算し、
+    エネルギービン別に2Dマップにカウントする。
+    (グローバル変数 NX, NY, X_MIN, X_MAX などを使用)
     """
     
+    # グローバル変数を使用
     NX = GLOBAL_NX_PHYS
     NY = GLOBAL_NY_PHYS
     x_min, x_max = X_MIN, X_MAX
     y_min, y_max = Y_MIN, Y_MAX 
     
+    # 粒子データの各列
     X_pos = particle_data[:, 0]
     Y_pos = particle_data[:, 1]
+    
+    # ★ 2,3,4列目は v/c (規格化速度) と仮定
     v_norm_x = particle_data[:, 2] # vx/c
     v_norm_y = particle_data[:, 3] # vy/c
     v_norm_z = particle_data[:, 4] # vz/c
     
     N_total = len(X_pos) 
 
+    # --- 1. 全粒子のエネルギーを計算 (相対論的) ---
     print("  -> (1/4) 全粒子のエネルギーを計算中...")
     v_norm_sq = v_norm_x**2 + v_norm_y**2 + v_norm_z**2
     v_norm_sq = np.clip(v_norm_sq, 0.0, 1.0 - 1e-12) 
@@ -136,7 +91,10 @@ def calculate_xray_proxy_binned(particle_data):
     else:
         print("  -> エネルギー範囲 (keV): 粒子なし")
 
+
+    # --- 2. 空間インデックス計算 ---
     print("  -> (2/4) 空間グリッドへのインデックスを計算中...")
+    # (linspace, digitize, clip のロジックは変更なし)
     x_bins = np.linspace(x_min, x_max, NX + 1)
     y_bins = np.linspace(y_min, y_max, NY + 1)
 
@@ -146,20 +104,20 @@ def calculate_xray_proxy_binned(particle_data):
     ix = np.clip(bin_x - 1, 0, NX - 1)
     iy = np.clip(bin_y - 1, 0, NY - 1)
 
+    # ★ 空間マスク (X_MIN=0.0, X_MAX=320.0 に基づく)
     spatial_mask = (X_pos >= x_min) & (X_pos <= x_max) & \
                    (Y_pos >= y_min) & (Y_pos <= y_max)
                    
     N_masked = np.sum(spatial_mask)
     
-    # ★★★ デバッグ出力 (psd_extractor_revised.py から移植) ★★★
+    # --- デバッグ出力 ---
     print("  --- デバッグ情報 ---")
     print(f"  X-Range (設定): [{x_min}, {x_max}], Y-Range (設定): [{y_min}, {y_max}]")
     if N_total > 0:
         print(f"  ★ X-pos min/max (粒子): {np.min(X_pos):.3f} / {np.max(X_pos):.3f}")
         print(f"  ★ Y-pos min/max (粒子): {np.min(Y_pos):.3f} / {np.max(Y_pos):.3f}")
     print(f"  全粒子数: {N_total}, マスクされた粒子数 (集計対象): {N_masked}")
-    # ★★★ デバッグ出力ここまで ★★★
-
+    
     if N_masked == 0:
         if N_total > 0:
             print("  -> **警告: マスクされた粒子がゼロです。グリッド範囲と粒子座標が一致していません。**")
@@ -168,6 +126,7 @@ def calculate_xray_proxy_binned(particle_data):
             binned_maps[bin_label] = np.zeros((NY, NX))
         return binned_maps
 
+    # --- 3. エネルギービンごとにマップを作成 ---
     binned_maps = {}
     print("  -> (3/4) エネルギービンごとにマスクを作成し、カウント中...")
     
@@ -189,8 +148,9 @@ def calculate_xray_proxy_binned(particle_data):
     print("  -> (4/4) 2Dマップ計算完了。")
     return binned_maps
 
+
 # =======================================================
-# ★ ステップ6: データ読み込み関数
+# ★ ステップ4: データ読み込み関数
 # =======================================================
 def load_text_data(filepath):
     # (変更なし)
@@ -213,7 +173,7 @@ def load_text_data(filepath):
         return None
 
 # =======================================================
-# ★ ステップ7: メイン関数 (★ ファイル読み込みを元に戻す)
+# ★ ステップ5: メイン関数
 # =======================================================
 def main():
     if len(sys.argv) < 4:
@@ -254,8 +214,7 @@ def main():
 
         for suffix, species_label in species_list:
             
-            # ★★★ ここを修正 (fnmatch を削除し、ハードコードに戻す) ★★★
-            # (スクリーンショットのファイル名に基づき、このファイル名が正しいと仮定)
+            # (ご提示いただいた 'psd_extractor_revised.py' と同じファイル名を使用)
             filename = f'{timestep}_0160-0320_psd_{suffix}.dat'
             filepath = os.path.join(data_dir, filename)
             
@@ -291,7 +250,7 @@ def main():
                 header_txt = (
                     f'Soft X-ray Proxy Map (Particle count)\n'
                     f'Energy Bin: [{e_min_str}, {e_max_str}) keV (Label: {bin_label})\n'
-                    f'Shape: ({GLOBAL_NY_PHYS}, {GLOBAL_NY_PHYS})' # (★タイポ修正: NX_PHYS)
+                    f'Shape: ({GLOBAL_NY_PHYS}, {GLOBAL_NX_PHYS})' # (★タイポ修正済)
                 )
                 
                 np.savetxt(output_filename, proxy_map, 

@@ -4,12 +4,11 @@ import os
 import sys
 
 # =======================================================
-# ★ ステップ1: init_param.dat 読み込み関数
-# (ご提示いただいた「動作する psd_extractor_revised.py」の関数を流用)
+# ★ ステップ1: init_param.dat 読み込み関数 (★ '=>' に修正)
 # =======================================================
 def load_simulation_parameters(param_filepath):
     """
-    init_param.dat (key ====> value 形式) を読み込む。
+    (Extractor に合わせて '=>' を使用)
     """
     params = {}
     print(f"パラメータファイルを読み込み中: {param_filepath}")
@@ -17,8 +16,8 @@ def load_simulation_parameters(param_filepath):
     try:
         with open(param_filepath, 'r') as f:
             for line in f:
-                if "=>" in line:
-                    parts = line.split("=>")
+                if "=>" in line: # ★ '====>' から '=>' に変更
+                    parts = line.split("=>") # ★ '====>' から '=>' に変更
                     key_part = parts[0].strip()
                     value_part = parts[1].strip()
                     
@@ -70,14 +69,11 @@ def load_simulation_parameters(param_filepath):
     return params
 
 # =======================================================
-# ★ ステップ2: ヘルパー関数 (元の plot.py から流用)
+# ★ ステップ2: ヘルパー関数 (★ 座標系を修正)
 # =======================================================
 
 def load_2d_field_data(timestep, component, field_dir, ny_phys, nx_phys):
-    """
-    (元の brehmsstrahlung_plot.py から変更なし)
-    visual_fields.py と同じ電磁場データローダー (Bx, By)
-    """
+    # (変更なし)
     filename = f'data_{timestep}_{component}.txt'
     filepath = os.path.join(field_dir, filename)
     try:
@@ -92,11 +88,12 @@ def load_2d_field_data(timestep, component, field_dir, ny_phys, nx_phys):
 
 def create_coordinates(NX, NY, DELX, DI):
     """
-    (元の brehmsstrahlung_plot.py から変更なし)
-    ★ X軸中心の座標グリッド ($x/d_i$, $y/d_i$) を作成
-    (psd_extractor_revised.py の X_MIN, X_MAX, Y_MIN, Y_MAX と一致する)
+    ★ X軸の座標系を [0, 320] に修正
     """
-    x_phys = np.linspace(-NX * DELX / 2.0, NX * DELX / 2.0, NX)
+    # ★ X_MIN = 0.0, X_MAX = NX * DELX
+    x_phys = np.linspace(0.0, NX * DELX, NX) 
+    
+    # Y_MIN = 0.0, Y_MAX = NY * DELX
     y_phys = np.linspace(0.0, NY * DELX, NY)
     
     x_norm = x_phys / DI
@@ -105,10 +102,7 @@ def create_coordinates(NX, NY, DELX, DI):
     return np.meshgrid(x_norm, y_norm)
 
 def load_xray_proxy_map(filepath, ny_phys, nx_phys):
-    """
-    (元の brehmsstrahlung_plot.py から変更なし)
-    TXTマップを読み込む
-    """
+    # (変更なし)
     try:
         data = np.loadtxt(filepath)
         if data.shape != (ny_phys, nx_phys):
@@ -121,18 +115,15 @@ def load_xray_proxy_map(filepath, ny_phys, nx_phys):
         return None
 
 # =======================================================
-# ★ ステップ3: メイン処理 (プロット) (★ 修正)
+# ★ ステップ3: メイン処理 (プロット) (変更なし)
 # =======================================================
 def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_dir, plot_base_dir):
-    """
-    指定されたタイムステップ *と* エネルギービン の2DマップTXTデータを読み込んでプロットする
-    """
+    # (この関数内のロジックは、座標グリッド(X_norm, Y_norm)が
+    #  create_coordinates から渡されるため、変更不要)
     
     NX = params['NX_PHYS']
     NY = params['NY_PHYS']
     
-    # --- 1. X線プロキシマップの読み込み ---
-    # ★ (入力ディレクトリがビンラベルを含むように変更)
     xray_data_dir = os.path.join(xray_base_dir, energy_bin_label)
     map_filepath = os.path.join(xray_data_dir, f'xray_proxy_{timestep}_{energy_bin_label}.txt')
     
@@ -142,10 +133,9 @@ def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_di
         print(f"警告: マップファイル {map_filepath} が見つからないか、読み込めません。スキップします。")
         return
 
-    # --- 2. 座標グリッドの作成 ---
+    # ★ ここで渡される X_norm が [0, 320/DI] の範囲になる
     X_norm, Y_norm = create_coordinates(NX, NY, params['DELX'], params['DI'])
 
-    # --- 3. (オプション) 磁力線の読み込み ---
     Bx_raw = load_2d_field_data(timestep, 'Bx', field_data_dir, NY, NX)
     By_raw = load_2d_field_data(timestep, 'By', field_data_dir, NY, NX)
     use_streamplot = (Bx_raw is not None) and (By_raw is not None)
@@ -159,7 +149,6 @@ def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_di
         Bx_norm = np.zeros((NY, NX))
         By_norm = np.zeros((NY, NX))
 
-    # --- 4. プロット ---
     print(f"-> プロットを作成中 (Bin: {energy_bin_label})...")
     fig, ax = plt.subplots(figsize=(10, 8))
     
@@ -168,7 +157,7 @@ def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_di
     
     try:
         from matplotlib.colors import LogNorm
-        min_val = 1 # カウント 1 から
+        min_val = 1 
         max_val = np.nanmax(Z_map_plot)
         
         if not np.isfinite(max_val) or max_val < min_val:
@@ -183,7 +172,6 @@ def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_di
         
         cbar = plt.colorbar(cf, ax=ax)
         cbar.set_label(f'High Energy Particle Count')
-
     except ValueError as e:
         print(f"  -> ログプロットに失敗 ({e})。リニアスケールで試行します。")
         max_val = np.nanmax(Z_map)
@@ -201,11 +189,9 @@ def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_di
             
     ax.set_xlabel('$x/d_i$')
     ax.set_ylabel('$y/d_i$')
-    # ★ タイトルにエネルギービン情報を追加
     ax.set_title(f'Soft X-ray Proxy (Energy Bin: {energy_bin_label}) at Timestep {timestep}')
     ax.tick_params(direction='in', top=True, right=True)
 
-    # ★ 保存 (ビンごとにサブディレクトリを作成)
     output_plot_dir = os.path.join(plot_base_dir, energy_bin_label)
     os.makedirs(output_plot_dir, exist_ok=True)
     
@@ -217,7 +203,7 @@ def plot_2d_map(timestep, energy_bin_label, params, field_data_dir, xray_base_di
     print(f"--- 2Dマッププロットを {output_filename} に保存しました ---")
 
 # =======================================================
-# ★ ステップ4: スクリプト実行 (★ 修正)
+# ★ ステップ4: スクリプト実行 (★ エネルギービン名更新)
 # =======================================================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -234,16 +220,9 @@ if __name__ == "__main__":
     except NameError:
         SCRIPT_DIR = os.path.abspath('.') 
 
-    # ★ 共通の init_param.dat のパス (extractor.py と同じパスに修正)
-    PARAM_FILE_PATH = os.path.join('/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
-
-    # ★ (オプション) 磁場データ (visual_fields.py が使う)
-    # (元の plot.py と同じ 'extracted_data' を仮定)
+    PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
     FIELD_DATA_DIR = os.path.join(SCRIPT_DIR, 'extracted_data') 
-    
-    # ★ 入力: 2DマップTXTデータ (ベースディレクトリ)
     XRAY_BASE_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_data_binned_txt')
-    # ★ 出力: プロット画像 (ベースディレクトリ)
     PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_plots_binned')
     os.makedirs(PLOT_BASE_DIR, exist_ok=True)
     
@@ -254,27 +233,28 @@ if __name__ == "__main__":
     print(f"プロット出力 (ベース): {PLOT_BASE_DIR}")
 
     # --- 2. 共通パラメータを一度だけ読み込む ---
-    # (★ `psd_extractor_revised.py` と同じローダーを使用)
     plot_params = load_simulation_parameters(PARAM_FILE_PATH)
     if plot_params is None:
         print("エラー: init_param.dat の読み込みに失敗したため、プロットを終了します。")
         sys.exit(1)
 
     # ★★★ どのエネルギービンをプロット対象とするか？ ★★★
-    # extractor.py の ENERGY_BINS_KEV の「ラベル」と一致させる必要があります
+    # (Extractor の新しいビン名に更新)
     ENERGY_BINS_TO_PLOT = [
-        '010eV_300eV',
-        '300eV_500eV',
-        '500eV_1keV',
-        '1keV_5keV',
-        '5keV_over'
+        '01keV_05keV',
+        '05keV_10keV',
+        '10keV_15keV',
+        '15keV_20keV',
+        '20keV_25keV',
+        '25keV_30keV',
+        # (以下、プロットしたいビンを追加)
+        '30keV_over'
     ]
     print(f"--- プロット対象エネルギービン: {ENERGY_BINS_TO_PLOT} ---")
 
     # --- 3. 引数の処理 ---
     timesteps_to_process = []
     if len(sys.argv) == 4:
-        # 範囲指定
         try:
             start_step = int(sys.argv[1])
             end_step   = int(sys.argv[2])
@@ -285,7 +265,6 @@ if __name__ == "__main__":
             print("エラー: 範囲指定の引数は3つの整数である必要があります。")
             sys.exit(1)
     else:
-        # 個別指定
         print(f"--- 個別指定 ---")
         for ts in sys.argv[1:]:
              try:
@@ -294,14 +273,13 @@ if __name__ == "__main__":
              except ValueError:
                  print(f"警告: {ts} は整数に変換できません。スキップします。")
                  
-    # --- 4. プロット実行 (★ タイムステップとエネルギービンの二重ループ) ---
+    # --- 4. プロット実行 (二重ループ) ---
     for step_int in timesteps_to_process:
         timestep_str = f"{step_int:06d}"
         print(f"\n=========================================")
         print(f"--- プロット中: タイムステップ {timestep_str} ---")
         
         for energy_bin_label in ENERGY_BINS_TO_PLOT:
-            # ★ 指定したビンが入力ディレクトリに存在するかチェック
             xray_data_dir_check = os.path.join(XRAY_BASE_DIR, energy_bin_label)
             if not os.path.isdir(xray_data_dir_check):
                 print(f"  -> スキップ: ビン '{energy_bin_label}' の入力ディレクトリが見つかりません: {xray_data_dir_check}")

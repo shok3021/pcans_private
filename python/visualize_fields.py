@@ -74,7 +74,7 @@ def load_simulation_parameters(param_filepath):
                     try:
                         parts = stripped_line.split()
                         # ★★★ インデックスを 4 から 6 に修正 (これは元のコードの修正を維持) ★★★
-                        VA0 = float(parts[6]) # 7番目の要素 (Va)
+                        VA0 = float(parts[7]) # 7番目の要素 (Va)
                         print(f"  -> 'Va' (VA0) の値を検出: {VA0}")
                     except (IndexError, ValueError):
                         print(f"  -> エラー: 'Va, Vi, Ve' の値の解析に失敗。行: {line}")
