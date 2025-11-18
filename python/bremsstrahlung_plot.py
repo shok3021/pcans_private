@@ -17,8 +17,8 @@ def load_simulation_parameters(param_filepath):
     try:
         with open(param_filepath, 'r') as f:
             for line in f:
-                if "====>" in line:
-                    parts = line.split("====>")
+                if "=>" in line:
+                    parts = line.split("=>")
                     key_part = parts[0].strip()
                     value_part = parts[1].strip()
                     
@@ -235,7 +235,7 @@ if __name__ == "__main__":
         SCRIPT_DIR = os.path.abspath('.') 
 
     # ★ 共通の init_param.dat のパス (extractor.py と同じパスに修正)
-    PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
+    PARAM_FILE_PATH = os.path.join('/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
 
     # ★ (オプション) 磁場データ (visual_fields.py が使う)
     # (元の plot.py と同じ 'extracted_data' を仮定)

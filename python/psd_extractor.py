@@ -17,8 +17,8 @@ def load_simulation_parameters(param_filepath):
     try:
         with open(param_filepath, 'r') as f:
             for line in f:
-                if "====>" in line:
-                    parts = line.split("====>")
+                if "=>" in line:
+                    parts = line.split("=>")
                     key_part = parts[0].strip()
                     value_part = parts[1].strip()
                     
