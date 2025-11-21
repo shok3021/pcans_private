@@ -1,167 +1,248 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 import os
 import sys
+from scipy.constants import m_e, c, elementary_charge 
 
 # =======================================================
-# ★ ステップ1: init_param.dat 読み込み
+# ★ 設定: エネルギービンと閾値
 # =======================================================
-def load_simulation_parameters(param_filepath):
-    params = {}
-    print(f"パラメータ読み込み: {param_filepath}")
+KEV_TO_J = 1000.0 * elementary_charge
 
-    try:
-        with open(param_filepath, 'r') as f:
-            for line in f:
-                if "=>" in line:
-                    parts = line.split("=>")
-                    key_part = parts[0].strip()
-                    value_part = parts[1].strip().replace('x', ' ')
-                    values = value_part.split()
-                    if not values: continue
+# 1. エネルギービンの定義 (keV)
+#    形式: (最小, 最大, ラベル名)
+ENERGY_BINS = [
+    (1.0, 100.0,    '001-100keV'),
+    (100.0, 200.0,  '100-200keV'),
+    (200.0, 500.0,  '200-500keV'),
+    (500.0, 100000.0, '500keV-over')
+]
 
-                    if key_part.startswith('grid size'):
-                        params['NX_GRID_POINTS'] = int(values[0])
-                        params['NY_GRID_POINTS'] = int(values[1])
-                    elif key_part.startswith('dx, dt, c'):
-                        params['DELX'] = float(values[0])
-                        params['DT'] = float(values[1])
-                        params['C_LIGHT'] = float(values[2])
-                    elif key_part.startswith('Mi, Me'):
-                        params['MI'] = float(values[0])
-                    elif key_part.startswith('Qi, Qe'):
-                        params['QI'] = float(values[0])
-                    elif key_part.startswith('Fpe, Fge, Fpi Fgi'):
-                        params['FPI'] = float(values[2])
-                        params['FGI'] = float(values[3])
-    except FileNotFoundError:
-        print(f"エラー: ファイルなし: {param_filepath}")
-        sys.exit(1)
+# 2. 熱的/非熱的の分離しきい値
+#    粒子エネルギー > ALPHA * (その場の温度 kB Te) なら「Non-Thermal」
+ALPHA_THRESHOLD = 10.0 
+
+# グリッド設定 (シミュレーションに合わせて調整)
+GLOBAL_NX_GRID = 321
+GLOBAL_NY_GRID = 640
+NX = GLOBAL_NX_GRID - 1
+NY = GLOBAL_NY_GRID - 1
+DELX = 1.0
+DI_PARAM = 100.0 
+
+# 座標範囲
+X_MIN, X_MAX = 0.0, NX * DELX
+Y_MIN, Y_MAX = 0.0, NY * DELX
+
+# =======================================================
+# 計算エンジン
+# =======================================================
+def calculate_detailed_intensity_maps(particle_data):
+    """
+    粒子データを以下の2軸で分類し、それぞれのIntensityマップを作成する辞書を返す
+      軸1: Thermal / NonThermal (局所温度依存)
+      軸2: Energy Bin (1-100, 100-200...)
+    """
+    # --- 1. 準備: 座標とエネルギー計算 ---
+    X_pos = particle_data[:, 0]
+    Y_pos = particle_data[:, 1]
+    vx = particle_data[:, 2]
+    vy = particle_data[:, 3]
+    vz = particle_data[:, 4]
+
+    print("  -> Calculating energies...")
+    v_sq = vx**2 + vy**2 + vz**2
+    v_sq = np.clip(v_sq, 0.0, 1.0 - 1e-12)
+    gamma = 1.0 / np.sqrt(1.0 - v_sq)
+    E_kin_keV = ((gamma - 1.0) * m_e * c**2) / KEV_TO_J
+
+    # --- 2. 局所温度・密度マップの作成 ---
+    print("  -> Generating local temperature map...")
+    x_edges = np.linspace(X_MIN, X_MAX, NX + 1)
+    y_edges = np.linspace(Y_MIN, Y_MAX, NY + 1)
+
+    # グリッドごとの粒子数(Density Proxy)
+    H_count, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges])
+    Density_map = H_count 
+
+    # グリッドごとの総エネルギー -> 温度計算用
+    H_sum_E, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges], weights=E_kin_keV)
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        Mean_E_map = H_sum_E / H_count
+        Mean_E_map[H_count == 0] = 0.0
+    
+    # 局所温度 Te ≈ (2/3)<E>
+    T_local_map = (2.0 / 3.0) * Mean_E_map
+
+    # --- 3. 粒子の振り分け (ベクトル化) ---
+    print("  -> Classifying particles...")
+    
+    # 粒子ごとのグリッド座標 (ix, iy)
+    ix = np.clip(np.digitize(X_pos, x_edges) - 1, 0, NX - 1)
+    iy = np.clip(np.digitize(Y_pos, y_edges) - 1, 0, NY - 1)
+
+    # 粒子位置での温度を取得
+    T_particle = T_local_map[iy, ix]
+    
+    # タイプ判定: Thermal vs NonThermal
+    threshold_E = ALPHA_THRESHOLD * T_particle
+    # 温度が定義できない(粒子が少ない)場所は便宜上全部NonThermal扱い等を防ぐため条件追加
+    is_nonthermal = (E_kin_keV > threshold_E) & (T_particle > 1e-6)
+    is_thermal    = ~is_nonthermal
+
+    # --- 4. マップの集計 ---
+    print("  -> Aggregating intensity maps...")
+    
+    # 制動放射の重み (∝ sqrt(E))
+    Emission_weight = np.sqrt(E_kin_keV)
+    
+    # 結果を格納する辞書: maps[Type][BinLabel]
+    maps = {
+        'Thermal': {},
+        'NonThermal': {}
+    }
+
+    # すべてのビンに対してマップを初期化
+    for _, _, label in ENERGY_BINS:
+        maps['Thermal'][label] = np.zeros((NY, NX))
+        maps['NonThermal'][label] = np.zeros((NY, NX))
+
+    # ループでビンごとに処理 (メモリ節約のためビンループ)
+    for e_min, e_max, label in ENERGY_BINS:
+        # エネルギー帯域マスク
+        in_bin = (E_kin_keV >= e_min) & (E_kin_keV < e_max)
         
-    required = ['NX_GRID_POINTS', 'NY_GRID_POINTS', 'DELX', 'C_LIGHT', 'FPI', 'MI', 'QI', 'FGI']
-    if not all(k in params for k in required):
-        sys.exit(1)
-        
-    params['NX_PHYS'] = params['NX_GRID_POINTS'] - 1
-    params['NY_PHYS'] = params['NY_GRID_POINTS'] - 1
-    params['DI'] = params['C_LIGHT'] / params['FPI']
-    params['B0'] = (params['FGI'] * params['MI'] * params['C_LIGHT']) / params['QI']
-    return params
-
-# =======================================================
-# ★ ステップ2: ヘルパー関数
-# =======================================================
-def load_2d_field_data(timestep, component, field_dir, ny, nx):
-    path = os.path.join(field_dir, f'data_{timestep}_{component}.txt')
-    try:
-        d = np.loadtxt(path, delimiter=',')
-        if d.shape != (ny, nx): return None
-        return d 
-    except: return None
-
-def create_coordinates(NX, NY, DELX, DI):
-    x_phys = np.linspace(0.0, NX * DELX, NX) 
-    y_phys = np.linspace(0.0, NY * DELX, NY)
-    return np.meshgrid(x_phys / DI, y_phys / DI)
-
-def load_xray_proxy_map(filepath, ny, nx):
-    try:
-        d = np.loadtxt(filepath)
-        if d.shape != (ny, nx): return None
-        print(f"-> マップ読み込み: {os.path.basename(filepath)}")
-        return d
-    except: return None
-
-# =======================================================
-# ★ ステップ3: プロット処理
-# =======================================================
-def plot_2d_map(timestep, energy_bin_label, params, field_dir, xray_dir, plot_dir):
-    NX, NY = params['NX_PHYS'], params['NY_PHYS']
-    
-    map_path = os.path.join(xray_dir, energy_bin_label, f'xray_proxy_{timestep}_{energy_bin_label}.txt')
-    Z_map = load_xray_proxy_map(map_path, NY, NX)
-    if Z_map is None: return
-
-    X_norm, Y_norm = create_coordinates(NX, NY, params['DELX'], params['DI'])
-
-    Bx = load_2d_field_data(timestep, 'Bx', field_dir, NY, NX)
-    By = load_2d_field_data(timestep, 'By', field_dir, NY, NX)
-    
-    fig, ax = plt.subplots(figsize=(10, 8))
-    cmap = 'hot'
-    Z_plot = np.where(Z_map > 0, Z_map, np.nan)
-    
-    from matplotlib.colors import LogNorm
-    try:
-        min_val = np.nanmin(Z_plot) if np.nanmin(Z_plot) > 0.1 else 0.1
-        max_val = np.nanmax(Z_plot)
-        norm = LogNorm(vmin=min_val, vmax=max_val)
-        cf = ax.contourf(X_norm, Y_norm, Z_plot, 
-                         levels=np.logspace(np.log10(min_val), np.log10(max_val), 50), 
-                         cmap=cmap, norm=norm, extend='max')
-        cbar = plt.colorbar(cf, ax=ax)
-        cbar.set_label(f'Intensity [a.u.]')
-    except:
-        cf = ax.contourf(X_norm, Y_norm, Z_map, 50, cmap=cmap)
-        plt.colorbar(cf, ax=ax).set_label(f'Intensity [a.u.]')
-
-    if Bx is not None and By is not None:
-        Bx_n, By_n = Bx / params['B0'], By / params['B0']
-        st = max(1, NX // 30)
-        ax.streamplot(X_norm[::st, ::st], Y_norm[::st, ::st], 
-                      Bx_n[::st, ::st], By_n[::st, ::st], 
-                      color='white', linewidth=0.5, density=1.0, minlength=0.1)
+        # (A) Thermal かつ このビン
+        mask_T = is_thermal & in_bin
+        if np.any(mask_T):
+            # ソース項 (Sum sqrt(E)) を計算
+            source_map = np.zeros((NY, NX))
+            np.add.at(source_map, (iy[mask_T], ix[mask_T]), Emission_weight[mask_T])
+            # Intensity = Density * Source
+            maps['Thermal'][label] = Density_map * source_map
             
-    ax.set_xlabel('$x/d_i$')
-    ax.set_ylabel('$y/d_i$')
-    ax.set_title(f'Soft X-ray Intensity ({energy_bin_label}) at TS {timestep}')
-    ax.tick_params(direction='in', top=True, right=True)
-
-    out_path = os.path.join(plot_dir, energy_bin_label, f'intensity_{timestep}_{energy_bin_label}.png')
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=200)
-    plt.close(fig)
-    print(f"--- 保存完了: {out_path} ---")
+        # (B) NonThermal かつ このビン
+        mask_NT = is_nonthermal & in_bin
+        if np.any(mask_NT):
+            source_map = np.zeros((NY, NX))
+            np.add.at(source_map, (iy[mask_NT], ix[mask_NT]), Emission_weight[mask_NT])
+            maps['NonThermal'][label] = Density_map * source_map
+            
+    return maps
 
 # =======================================================
-# ★ ステップ4: メイン実行
+# 保存・プロット関数
 # =======================================================
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python script.py [start] [end] [step]")
+def save_and_plot_category(maps_dict, timestep, output_base):
+    """
+    辞書に入ったマップを保存し、プロットする
+    """
+    # 軸作成
+    X_axis = np.linspace(X_MIN, X_MAX, NX) / DI_PARAM
+    Y_axis = np.linspace(Y_MIN, Y_MAX, NY) / DI_PARAM
+    XX, YY = np.meshgrid(X_axis, Y_axis)
+
+    for particle_type in ['Thermal', 'NonThermal']:
+        type_dir = os.path.join(output_base, particle_type)
+        os.makedirs(type_dir, exist_ok=True)
+        
+        for e_min, e_max, bin_label in ENERGY_BINS:
+            
+            intensity_map = maps_dict[particle_type][bin_label]
+            
+            # --- 1. TXT保存 ---
+            # フォルダ階層: output/Thermal/100-200keV/intensity_...
+            bin_dir = os.path.join(type_dir, bin_label)
+            os.makedirs(bin_dir, exist_ok=True)
+            
+            txt_name = f'intensity_{particle_type}_{bin_label}_{timestep}.txt'
+            txt_path = os.path.join(bin_dir, txt_name)
+            
+            header = (f'Bremsstrahlung Intensity Map\n'
+                      f'Type: {particle_type}\n'
+                      f'Energy Bin: {bin_label} ({e_min}-{e_max} keV)\n'
+                      f'Timestep: {timestep}')
+            
+            np.savetxt(txt_path, intensity_map, header=header, fmt='%.6g')
+            
+            # --- 2. PNGプロット ---
+            # 全面ゼロならスキップするか、真っ黒で出す
+            max_val = np.max(intensity_map)
+            if max_val <= 0:
+                print(f"    (Skipping plot for {particle_type} / {bin_label}: No signal)")
+                continue
+
+            fig, ax = plt.subplots(figsize=(8, 10))
+            
+            # カラーマップ: Thermalは赤系、NonThermalは青系で見やすく
+            cmap = 'Reds' if particle_type == 'Thermal' else 'Blues'
+            
+            # ログスケール
+            data_plot = np.where(intensity_map > 1e-5, intensity_map, np.nan)
+            vmin = np.nanpercentile(data_plot, 5) if np.nanpercentile(data_plot, 5) > 0 else 1e-3
+            vmax = np.nanmax(data_plot)
+            
+            if vmax > vmin:
+                norm = colors.LogNorm(vmin=vmin, vmax=vmax)
+                pcm = ax.pcolormesh(XX, YY, data_plot, cmap=cmap, norm=norm, shading='auto')
+                plt.colorbar(pcm, ax=ax, label='Intensity [a.u.]')
+            
+            ax.set_title(f'{particle_type} Intensity ({bin_label})\nTS: {timestep}')
+            ax.set_xlabel('$x / d_i$')
+            ax.set_ylabel('$y / d_i$')
+            ax.set_aspect('equal')
+            
+            img_name = f'plot_{particle_type}_{bin_label}_{timestep}.png'
+            img_path = os.path.join(bin_dir, img_name)
+            plt.savefig(img_path, dpi=150)
+            plt.close()
+            
+            print(f"    Saved: {particle_type} - {bin_label}")
+
+# =======================================================
+# メイン
+# =======================================================
+def main():
+    if len(sys.argv) < 4:
+        print("Usage: python detailed_brems.py [start] [end] [step]")
         sys.exit(1)
         
-    plt.rcParams['mathtext.fontset'] = 'cm'
-    plt.rcParams['font.family'] = 'serif'
+    start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
     
+    # ディレクトリ設定
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    except: SCRIPT_DIR = os.path.abspath('.') 
-
-    PARAM_FILE = '/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat'
-    FIELD_DIR = os.path.join(SCRIPT_DIR, 'extracted_data') 
-    XRAY_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_data_binned_txt')
-    PLOT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_plots_binned')
+    except: SCRIPT_DIR = os.path.abspath('.')
     
-    params = load_simulation_parameters(PARAM_FILE)
+    DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_detailed_intensity')
+    
+    print(f"--- Detailed Bremsstrahlung Analysis ---")
+    print(f"Output: {OUTPUT_DIR}")
+    
+    for t_int in range(start, end + step, step):
+        ts = f"{t_int:06d}"
+        print(f"\n=== Processing TS: {ts} ===")
+        
+        fpath = os.path.join(DATA_DIR, f'{ts}_0160-0320_psd_e.dat')
+        if not os.path.exists(fpath):
+            print("  File not found.")
+            continue
+            
+        try:
+            data = np.loadtxt(fpath)
+            if data.size == 0: continue
+            if data.ndim == 1: data = data.reshape(1, -1)
+        except: continue
+        
+        # 計算
+        result_maps = calculate_detailed_intensity_maps(data)
+        
+        # 保存 & プロット
+        save_and_plot_category(result_maps, ts, OUTPUT_DIR)
 
-    # ★★★ 更新されたプロット対象ビン ★★★
-    ENERGY_BINS_TO_PLOT = [
-        '001keV_100keV',
-        '100keV_200keV',
-        '200keV_300keV',
-        '300keV_400keV', # 追加
-        '400keV_over'
-    ]
+    print("\nDone.")
 
-    steps = []
-    if len(sys.argv) == 4:
-        steps = range(int(sys.argv[1]), int(sys.argv[2]) + int(sys.argv[3]), int(sys.argv[3]))
-    else:
-        steps = [int(x) for x in sys.argv[1:]]
-
-    for ts in steps:
-        print(f"\n--- TS {ts:06d} ---")
-        for label in ENERGY_BINS_TO_PLOT:
-            if os.path.exists(os.path.join(XRAY_DIR, label)):
-                plot_2d_map(f"{ts:06d}", label, params, FIELD_DIR, XRAY_DIR, PLOT_DIR)
+if __name__ == "__main__":
+    main()
