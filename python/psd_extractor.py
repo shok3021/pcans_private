@@ -32,7 +32,8 @@ print(f"空間範囲: X=[{X_MIN}, {X_MAX}], Y=[{Y_MIN}, {Y_MAX}] (セル幅: {DE
 # =======================================================
 def calculate_moments_from_particle_list(particle_data):
     """
-    粒子の生データ (X, Y, Vx, Vy, Vz) から空間グリッド上の平均速度を計算する。
+    粒子の生データ (X, Y, Vx, Vy, Vz) から空間グリッド上の
+    密度、流体速度、そして【温度】を計算する。
     """
 
     NX = GLOBAL_NX_PHYS
@@ -49,7 +50,7 @@ def calculate_moments_from_particle_list(particle_data):
     Vy_raw = particle_data[:, 3]
     Vz_raw = particle_data[:, 4]
 
-    N_total = len(X_pos) # 全粒子数
+    N_total = len(X_pos)
 
     # --- インデックス計算 ---
     x_bins = np.linspace(x_min, x_max, NX + 1)
@@ -61,7 +62,7 @@ def calculate_moments_from_particle_list(particle_data):
     ix = np.clip(bin_x - 1, 0, NX - 1)
     iy = np.clip(bin_y - 1, 0, NY - 1)
 
-    # 粒子が空間グリッド範囲内にあるかのマスクを作成
+    # マスク作成
     mask = (X_pos >= x_min) & (X_pos <= x_max) & \
            (Y_pos >= y_min) & (Y_pos <= y_max)
 
@@ -73,50 +74,62 @@ def calculate_moments_from_particle_list(particle_data):
 
     N_masked = len(ix_masked)
 
-    # =======================================================
-    # ★★★ デバッグ出力の追加 ★★★
-    # =======================================================
-    print("  --- デバッグ情報 ---")
-    print(f"  X-Range (設定): [{x_min}, {x_max}], Y-Range (設定): [{y_min}, {y_max}]")
-    if N_total > 0:
-        print(f"  X-pos min/max (粒子): {np.min(X_pos):.3f} / {np.max(X_pos):.3f}")
-        print(f"  Y-pos min/max (粒子): {np.min(Y_pos):.3f} / {np.max(Y_pos):.3f}")
-    else:
-        print("  粒子データが空です。")
-    print(f"  全粒子数: {N_total}, マスクされた粒子数 (集計対象): {N_masked}")
+    # --- 集計用配列の初期化 ---
+    density = np.zeros((NY, NX))
+    
+    # 1次モーメント用 (平均速度用)
+    vx_sum = np.zeros((NY, NX))
+    vy_sum = np.zeros((NY, NX))
+    vz_sum = np.zeros((NY, NX))
+    
+    # ★追加: 2次モーメント用 (温度計算用: v^2 の合計)
+    vx2_sum = np.zeros((NY, NX))
+    vy2_sum = np.zeros((NY, NX))
+    vz2_sum = np.zeros((NY, NX))
 
-    if N_masked == 0:
-        if N_total > 0:
-            print("  -> **警告: マスクされた粒子がゼロです。グリッド範囲と粒子座標が一致していません。**")
-        density = np.zeros((NY, NX))
-        vx_sum = np.zeros((NY, NX))
-        vy_sum = np.zeros((NY, NX))
-        vz_sum = np.zeros((NY, NX))
-    else:
-        print(f"  IX_masked min/max: {np.min(ix_masked)} / {np.max(ix_masked)} (NX={NX})")
-        print(f"  IY_masked min/max: {np.min(iy_masked)} / {np.max(iy_masked)} (NY={NY})")
-
-        density = np.zeros((NY, NX))
-        vx_sum = np.zeros((NY, NX))
-        vy_sum = np.zeros((NY, NX))
-        vz_sum = np.zeros((NY, NX))
-
+    if N_masked > 0:
+        # 密度と速度の和
         np.add.at(density, (iy_masked, ix_masked), 1)
         np.add.at(vx_sum, (iy_masked, ix_masked), vx_masked)
         np.add.at(vy_sum, (iy_masked, ix_masked), vy_masked)
         np.add.at(vz_sum, (iy_masked, ix_masked), vz_masked)
+        
+        # ★追加: 速度の二乗和
+        np.add.at(vx2_sum, (iy_masked, ix_masked), vx_masked**2)
+        np.add.at(vy2_sum, (iy_masked, ix_masked), vy_masked**2)
+        np.add.at(vz2_sum, (iy_masked, ix_masked), vz_masked**2)
 
-    density_safe = np.where(density > 0, density, 1e-12)
+    # ゼロ除算回避
+    density_safe = np.where(density > 0, density, 1.0) # 割り算用に一時的に1を入れる
+    
+    # --- 1. 流体速度 (V_fluid = <v>) ---
     average_vx = vx_sum / density_safe
     average_vy = vy_sum / density_safe
     average_vz = vz_sum / density_safe
     
-    # 粒子が0だったセルは 0.0 に戻す
-    average_vx[density == 0] = 0.0
-    average_vy[density == 0] = 0.0
-    average_vz[density == 0] = 0.0
+    # --- 2. 速度の二乗平均 (<v^2>) ---
+    mean_vx2 = vx2_sum / density_safe
+    mean_vy2 = vy2_sum / density_safe
+    mean_vz2 = vz2_sum / density_safe
+    
+    # --- 3. 温度の計算 (T = <v^2> - <v>^2) ---
+    # ※ 密度0の場所は計算結果がおかしくなるので後で0に戻す
+    Tx = mean_vx2 - average_vx**2
+    Ty = mean_vy2 - average_vy**2
+    Tz = mean_vz2 - average_vz**2
+    
+    # 等方温度 (スカラ) として 3成分の平均をとるのが一般的
+    Temperature = (Tx + Ty + Tz) / 3.0
 
-    return density, average_vx, average_vy, average_vz
+    # 密度が0だった場所を 0.0 にクリーンアップ
+    mask_zero = (density == 0)
+    average_vx[mask_zero] = 0.0
+    average_vy[mask_zero] = 0.0
+    average_vz[mask_zero] = 0.0
+    Temperature[mask_zero] = 0.0
+
+    # 戻り値に Temperature を追加
+    return density, average_vx, average_vy, average_vz, Temperature
 
 # --- (load_text_data および save_data_to_txt 関数は変更なし) ---
 def load_text_data(filepath):
@@ -199,10 +212,10 @@ def main():
 
             print(f"  -> {len(particle_data)} 個の粒子を読み込みました。モーメントを計算中...")
 
-            # --- 1. 粒子データからモーメント (平均速度) を計算し、空間グリッドにマップ ---
-            density, average_vx, average_vy, average_vz = calculate_moments_from_particle_list(particle_data)
+            # --- 1. モーメント計算 (温度 T を追加で受け取る) ---
+            density, average_vx, average_vy, average_vz, Temperature = calculate_moments_from_particle_list(particle_data)
 
-            # --- 2. 各物理量をテキストファイルに保存 ---
+            # --- 2. 保存 (温度 T を追加で保存) ---
             save_data_to_txt(density, 'Particle Count (Density Proxy)', 
                              timestep, species_label, OUTPUT_DIR, 'density_count')
             save_data_to_txt(average_vx, 'Average Velocity (Vx)', 
@@ -211,6 +224,10 @@ def main():
                              timestep, species_label, OUTPUT_DIR, 'Vy')
             save_data_to_txt(average_vz, 'Average Velocity (Vz)', 
                              timestep, species_label, OUTPUT_DIR, 'Vz')
+            
+            # ★追加: 温度データの保存
+            save_data_to_txt(Temperature, 'Temperature', 
+                             timestep, species_label, OUTPUT_DIR, 'T')
             
             print(f"--- タイムステップ {timestep} の {species_label} データ抽出・保存が完了しました ---")
 
