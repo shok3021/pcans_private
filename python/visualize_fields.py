@@ -256,12 +256,25 @@ def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu
     cbar = plt.colorbar(cf, ax=ax, format=formatter_str, ticks=plot_ticks)
     
     cbar.set_label(label)
-    stride_x = max(1, Bx.shape[1] // 30) 
-    stride_y = max(1, Bx.shape[0] // 30) 
-    ax.streamplot(X[::stride_y, ::stride_x], Y[::stride_y, ::stride_x], 
-                  Bx[::stride_y, ::stride_x], By[::stride_y, ::stride_x], 
-                  color='gray', linewidth=0.5, density=1.0, 
-                  arrowstyle='-', minlength=0.1, zorder=1)
+    
+    # stride_x = max(1, Bx.shape[1] // 30) 
+    # stride_y = max(1, Bx.shape[0] // 30) 
+    # ax.streamplot(X[::stride_y, ::stride_x], Y[::stride_y, ::stride_x], 
+    #               Bx[::stride_y, ::stride_x], By[::stride_y, ::stride_x], 
+    #               color='gray', linewidth=0.5, density=1.0, 
+    #               arrowstyle='-', minlength=0.1, zorder=1)
+    try:
+        # dxは相対的な形状には影響しないので1.0で計算
+        Psi_local = cumtrapz(By, dx=1.0, axis=1, initial=0) 
+        
+        # 等高線を描画 (これが磁力線になります)
+        # levels: 線の本数 (20〜30くらいが適切)
+        # colors: 線の色 (薄いグレーや黒)
+        # linewidths: 線の太さ
+        ax.contour(X, Y, Psi_local, levels=25, colors='gray', linewidths=0.5, alpha=0.8)
+        
+    except Exception as e:
+        print(f"磁力線描画エラー: {e}")
     
     ax.text(0.98, 0.98, omega_t_str, 
             transform=ax.transAxes, 
@@ -305,13 +318,21 @@ def plot_combined(ax, X, Y, Z, Bx, By, title, label, cmap, vmin, vmax, tag_key, 
     cbar.set_label(label, fontsize=7)
     cbar.ax.tick_params(labelsize=6)
 
-    stride_x = max(1, Bx.shape[1] // 15)
-    stride_y = max(1, Bx.shape[0] // 15)
+    # stride_x = max(1, Bx.shape[1] // 15)
+    # stride_y = max(1, Bx.shape[0] // 15)
     
-    ax.streamplot(X[::stride_y, ::stride_x], Y[::stride_y, ::stride_x], 
-                  Bx[::stride_y, ::stride_x], By[::stride_y, ::stride_x], 
-                  color=stream_color, linewidth=0.5, density=stream_density, 
-                  arrowstyle='-', minlength=0.1, zorder=1)
+    # ax.streamplot(X[::stride_y, ::stride_x], Y[::stride_y, ::stride_x], 
+    #               Bx[::stride_y, ::stride_x], By[::stride_y, ::stride_x], 
+    #               color=stream_color, linewidth=0.5, density=stream_density, 
+    #               arrowstyle='-', minlength=0.1, zorder=1)
+    try:
+        Psi_local = cumtrapz(By, dx=1.0, axis=1, initial=0)
+        
+        # levelsの数を少し減らしてスッキリさせる (combined用)
+        ax.contour(X, Y, Psi_local, levels=15, colors=stream_color, linewidths=0.5, alpha=0.8)
+        
+    except Exception as e:
+        print(f"磁力線描画エラー: {e}")
                   
     ax.set_title(title, fontsize=10)
     ax.set_xlabel('$x/d_i$', fontsize=8)
