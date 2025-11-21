@@ -3,7 +3,7 @@ import os
 import sys
 
 # =======================================================
-# 設定 (Fortran const モジュール準拠)
+# 設定
 # =======================================================
 GLOBAL_NX_GRID_POINTS = 321  
 GLOBAL_NY_GRID_POINTS = 640
@@ -16,16 +16,9 @@ X_MAX = GLOBAL_NX_PHYS * DELX
 Y_MIN = 0.0           
 Y_MAX = GLOBAL_NY_PHYS * DELX
 
-# ★★★ エネルギー分離の閾値係数 ★★★
-# 粒子のエネルギーが局所熱エネルギー(1.5 * T)の何倍を超えたら「非熱的」とみなすか
-# 例: 3.0 〜 5.0 が一般的
 ENERGY_THRESHOLD_COEFF = 5.0
 
 def calculate_moments_and_energy(particle_data):
-    """
-    粒子データから密度、流体速度、温度を計算し、
-    さらにそれを用いて熱的/非熱的エネルギー密度を分離計算する。
-    """
     NX = GLOBAL_NX_PHYS
     NY = GLOBAL_NY_PHYS
     x_min, x_max = X_MIN, X_MAX
@@ -54,23 +47,21 @@ def calculate_moments_and_energy(particle_data):
     vy_m = Vy_raw[mask]
     vz_m = Vz_raw[mask]
 
-    # --- 2. 基礎モーメント計算 (密度、流体速度、温度) ---
+    # --- 2. 基礎モーメント計算 ---
     density = np.zeros((NY, NX))
     vx_sum = np.zeros((NY, NX))
     vy_sum = np.zeros((NY, NX))
     vz_sum = np.zeros((NY, NX))
-    v2_sum = np.zeros((NY, NX)) # 全速度の二乗和
+    v2_sum = np.zeros((NY, NX)) 
 
     if len(ix_m) > 0:
         np.add.at(density, (iy_m, ix_m), 1)
         np.add.at(vx_sum, (iy_m, ix_m), vx_m)
         np.add.at(vy_sum, (iy_m, ix_m), vy_m)
         np.add.at(vz_sum, (iy_m, ix_m), vz_m)
-        # 温度計算用 (v^2)
         v_sq = vx_m**2 + vy_m**2 + vz_m**2
         np.add.at(v2_sum, (iy_m, ix_m), v_sq)
 
-    # 流体量計算
     density_safe = np.where(density > 0, density, 1.0)
     ux = vx_sum / density_safe
     uy = vy_sum / density_safe
@@ -78,45 +69,42 @@ def calculate_moments_and_energy(particle_data):
     
     mean_v2 = v2_sum / density_safe
     u2 = ux**2 + uy**2 + uz**2
+    T_scalar = (mean_v2 - u2) / 3.0 
     
-    # 温度 T (速度分散) = <v^2> - <u>^2
-    # ここでの T は v^2 の次元 (エネルギー/質量)
-    T_scalar = (mean_v2 - u2) / 3.0 # 3次元等方と仮定した1自由度あたりの温度
-    
-    # 密度0の場所をクリア
     zero_mask = (density == 0)
     ux[zero_mask] = 0; uy[zero_mask] = 0; uz[zero_mask] = 0; T_scalar[zero_mask] = 0
 
-    # --- 3. エネルギー分離計算 (Thermal vs Non-Thermal) ---
-    # ベクトル化のために、各粒子に対応する流体速度と温度を配列化
+    # --- 3. エネルギー分離計算 ---
     p_ux = ux[iy_m, ix_m]
     p_uy = uy[iy_m, ix_m]
     p_uz = uz[iy_m, ix_m]
     p_T  = T_scalar[iy_m, ix_m]
 
-    # 粒子の流体枠での運動エネルギー (質量=1として計算 => v^2/2)
-    # e_p = 0.5 * (v - u)^2
+    # 粒子の運動エネルギー (流体枠)
     e_p = 0.5 * ((vx_m - p_ux)**2 + (vy_m - p_uy)**2 + (vz_m - p_uz)**2)
 
-    # 閾値エネルギー (局所温度に基づく)
-    # 熱エネルギーの平均は (3/2)T。その ENERGY_THRESHOLD_COEFF 倍を閾値とする
+    # 閾値判定
     e_thresh = ENERGY_THRESHOLD_COEFF * (1.5 * p_T)
-
-    # 判定 (温度が極端に低い、または密度が低い場所はすべてThermal扱いにするなどの安全策)
     is_non_thermal = (e_p > e_thresh) & (p_T > 1e-9)
     is_thermal     = ~is_non_thermal
 
-    # 集計用配列
+    # --- 【修正点】 エネルギーだけでなく、個数(密度)も分離して集計する ---
     E_thermal_grid = np.zeros((NY, NX))
     E_nonthermal_grid = np.zeros((NY, NX))
-
-    # 熱的エネルギー密度積算
-    np.add.at(E_thermal_grid, (iy_m[is_thermal], ix_m[is_thermal]), e_p[is_thermal])
     
-    # 非熱的エネルギー密度積算
-    np.add.at(E_nonthermal_grid, (iy_m[is_non_thermal], ix_m[is_non_thermal]), e_p[is_non_thermal])
+    N_thermal_grid = np.zeros((NY, NX))     # 追加: 熱的粒子の数
+    N_nonthermal_grid = np.zeros((NY, NX))  # 追加: 非熱的粒子の数
 
-    return density, E_thermal_grid, E_nonthermal_grid
+    # 熱的成分
+    np.add.at(E_thermal_grid, (iy_m[is_thermal], ix_m[is_thermal]), e_p[is_thermal])
+    np.add.at(N_thermal_grid, (iy_m[is_thermal], ix_m[is_thermal]), 1.0) # 数をカウント
+    
+    # 非熱的成分
+    np.add.at(E_nonthermal_grid, (iy_m[is_non_thermal], ix_m[is_non_thermal]), e_p[is_non_thermal])
+    np.add.at(N_nonthermal_grid, (iy_m[is_non_thermal], ix_m[is_non_thermal]), 1.0) # 数をカウント
+
+    # 4つの配列を返す
+    return E_thermal_grid, N_thermal_grid, E_nonthermal_grid, N_nonthermal_grid
 
 
 def load_text_data(filepath):
@@ -139,16 +127,12 @@ def main():
 
     start, end, step_size = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
     
-    # 入力ディレクトリ設定
     data_dir = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/psd/')
-    
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')
-    
     OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_energy_data')
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 電子のみを対象とする場合 ('e', 'electron')
     target_species = [('e', 'electron')] 
 
     for current_step in range(start, end + step_size, step_size):
@@ -162,16 +146,14 @@ def main():
             pdata = load_text_data(filepath)
             if pdata is None: continue
 
-            # 計算実行
-            dens, Eth, Enth = calculate_moments_and_energy(pdata)
+            # 計算
+            Eth, Nth, Enth, Nnth = calculate_moments_and_energy(pdata)
 
-            # 保存
-            save_data(Eth, species_label, OUTPUT_DIR, timestep, 'Energy_Thermal')
+            # 保存 (密度データも保存する)
+            save_data(Eth,  species_label, OUTPUT_DIR, timestep, 'Energy_Thermal')
+            save_data(Nth,  species_label, OUTPUT_DIR, timestep, 'Density_Thermal') # NEW
             save_data(Enth, species_label, OUTPUT_DIR, timestep, 'Energy_NonThermal')
-            
-            # 割合なども計算したければここで計算可能
-            # ratio = Enth / (Eth + Enth + 1e-20)
-            # save_data(ratio, species_label, OUTPUT_DIR, timestep, 'Energy_Ratio')
+            save_data(Nnth, species_label, OUTPUT_DIR, timestep, 'Density_NonThermal') # NEW
 
 if __name__ == "__main__":
     main()
