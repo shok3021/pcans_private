@@ -15,5 +15,7 @@ run_mrx.sh.*
 raw_particle_data/
 helloworld.sh.*
 final_plots/
-bremsstrahlung_plots_detailed/
+bremsstrahlung_plots/
 heating_plots/
+energy_plots/
+energy_plots_eV/
