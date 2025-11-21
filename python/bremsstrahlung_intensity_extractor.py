@@ -43,11 +43,11 @@ Y_MIN, Y_MAX = 0.0, NY * DELX
 # =======================================================
 def calculate_detailed_intensity_maps(particle_data):
     """
-    粒子データを以下の2軸で分類し、それぞれのIntensityマップを作成する辞書を返す
-      軸1: Thermal / NonThermal (局所温度依存)
-      軸2: Energy Bin (1-100, 100-200...)
+    改良版: 2段階温度決定法
+    高エネルギー粒子に引きずられない「背景温度(Background Temperature)」を算出し、
+    それを用いて熱的/非熱的を厳密に分離する。
     """
-    # --- 1. 準備: 座標とエネルギー計算 ---
+    # --- 1. 準備 ---
     X_pos = particle_data[:, 0]
     Y_pos = particle_data[:, 1]
     vx = particle_data[:, 2]
@@ -60,78 +60,105 @@ def calculate_detailed_intensity_maps(particle_data):
     gamma = 1.0 / np.sqrt(1.0 - v_sq)
     E_kin_keV = ((gamma - 1.0) * m_e * c**2) / KEV_TO_J
 
-    # --- 2. 局所温度・密度マップの作成 ---
-    print("  -> Generating local temperature map...")
     x_edges = np.linspace(X_MIN, X_MAX, NX + 1)
     y_edges = np.linspace(Y_MIN, Y_MAX, NY + 1)
 
-    # グリッドごとの粒子数(Density Proxy)
-    H_count, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges])
-    Density_map = H_count 
-
-    # グリッドごとの総エネルギー -> 温度計算用
-    H_sum_E, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges], weights=E_kin_keV)
-    
-    with np.errstate(divide='ignore', invalid='ignore'):
-        Mean_E_map = H_sum_E / H_count
-        Mean_E_map[H_count == 0] = 0.0
-    
-    # 局所温度 Te ≈ (2/3)<E>
-    T_local_map = (2.0 / 3.0) * Mean_E_map
-
-    # --- 3. 粒子の振り分け (ベクトル化) ---
-    print("  -> Classifying particles...")
-    
-    # 粒子ごとのグリッド座標 (ix, iy)
+    # 粒子ごとのグリッド座標 (ix, iy) を先に計算
     ix = np.clip(np.digitize(X_pos, x_edges) - 1, 0, NX - 1)
     iy = np.clip(np.digitize(Y_pos, y_edges) - 1, 0, NY - 1)
 
-    # 粒子位置での温度を取得
-    T_particle = T_local_map[iy, ix]
+    # ===========================================================
+    # ★ STEP 1: 仮の温度 (T_raw) を計算
+    # ===========================================================
+    print("  -> Step 1: Estimating raw temperature...")
+    # 全粒子で密度とエネルギー和を計算
+    H_count_all, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges])
+    H_sum_E_all, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges], weights=E_kin_keV)
     
-    # タイプ判定: Thermal vs NonThermal
-    threshold_E = ALPHA_THRESHOLD * T_particle
-    # 温度が定義できない(粒子が少ない)場所は便宜上全部NonThermal扱い等を防ぐため条件追加
-    is_nonthermal = (E_kin_keV > threshold_E) & (T_particle > 1e-6)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        Mean_E_raw = H_sum_E_all / H_count_all
+        Mean_E_raw[H_count_all == 0] = 0.0
+    
+    T_raw_map = (2.0 / 3.0) * Mean_E_raw
+
+    # ===========================================================
+    # ★ STEP 2: 背景温度 (T_bg) の再計算（ここが重要！）
+    # ===========================================================
+    print("  -> Step 2: Refining background temperature (removing hot tails)...")
+    
+    # 各粒子の場所の「仮温度」を取得
+    T_particle_raw = T_raw_map[iy, ix]
+    
+    # 「仮温度」の 5倍 以下の粒子だけを「Core (背景プラズマ)」とみなす
+    # ※ ここで厳しい基準(5.0)で高エネルギー粒子を完全に排除して温度を計算し直す
+    mask_core = (E_kin_keV <= 5.0 * T_particle_raw)
+    
+    # Core粒子だけで統計を取り直す
+    H_count_core, _, _ = np.histogram2d(Y_pos[mask_core], X_pos[mask_core], bins=[y_edges, x_edges])
+    H_sum_E_core, _, _ = np.histogram2d(Y_pos[mask_core], X_pos[mask_core], bins=[y_edges, x_edges], weights=E_kin_keV[mask_core])
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        Mean_E_bg = H_sum_E_core / H_count_core
+        # 粒子がいなくなってしまった場所は、仕方ないのでRawの値を使うか0にする
+        # ここではRawの値をフォールバックとして使う
+        Mean_E_bg[H_count_core == 0] = Mean_E_raw[H_count_core == 0]
+        
+    T_bg_map = (2.0 / 3.0) * Mean_E_bg
+
+    # ===========================================================
+    # ★ STEP 3: 本番の振り分け (Thermal vs NonThermal)
+    # ===========================================================
+    print("  -> Classifying particles using refined Temperature...")
+    
+    # 洗練された背景温度を取得
+    T_particle_final = T_bg_map[iy, ix]
+    
+    # 閾値判定: 背景温度の 10倍 以上なら NonThermal
+    # これにより、背景が冷たい場所にある高エネルギー粒子が際立つ
+    threshold_final = ALPHA_THRESHOLD * T_particle_final
+    
+    is_nonthermal = (E_kin_keV > threshold_final) & (T_particle_final > 1e-6)
     is_thermal    = ~is_nonthermal
 
-    # --- 4. マップの集計 ---
+    # --- 4. マップの集計 (以前と同じ) ---
     print("  -> Aggregating intensity maps...")
     
-    # 制動放射の重み (∝ sqrt(E))
+    # ※密度マップは「全粒子」のものを使うのが一般的だが、
+    #   熱的成分のマップには「全密度」を使うか「熱的粒子の密度」を使うか議論がある。
+    #   ここでは「その成分自身の密度×エネルギー」となるよう、成分ごとに集計し直すのが最も正確。
+    
     Emission_weight = np.sqrt(E_kin_keV)
     
-    # 結果を格納する辞書: maps[Type][BinLabel]
     maps = {
         'Thermal': {},
         'NonThermal': {}
     }
 
-    # すべてのビンに対してマップを初期化
     for _, _, label in ENERGY_BINS:
         maps['Thermal'][label] = np.zeros((NY, NX))
         maps['NonThermal'][label] = np.zeros((NY, NX))
 
-    # ループでビンごとに処理 (メモリ節約のためビンループ)
     for e_min, e_max, label in ENERGY_BINS:
-        # エネルギー帯域マスク
+        # エネルギー帯域
         in_bin = (E_kin_keV >= e_min) & (E_kin_keV < e_max)
         
-        # (A) Thermal かつ このビン
+        # (A) Thermal
         mask_T = is_thermal & in_bin
         if np.any(mask_T):
-            # ソース項 (Sum sqrt(E)) を計算
-            source_map = np.zeros((NY, NX))
-            np.add.at(source_map, (iy[mask_T], ix[mask_T]), Emission_weight[mask_T])
-            # Intensity = Density * Source
-            maps['Thermal'][label] = Density_map * source_map
+            # ここでは単純化のため「そのビンにいる粒子の数密度 × その粒子の放射強度」を直接足しこむ
+            # Intensity ~ Density_local * sqrt(E) 
+            # グリッドごとの合計値として計算
+            intens_map = np.zeros((NY, NX))
+            # 重み = sqrt(E)。これを足し合わせれば、(ΣN) * <sqrt(E)> に近い物理量になる
+            np.add.at(intens_map, (iy[mask_T], ix[mask_T]), Emission_weight[mask_T])
+            maps['Thermal'][label] = intens_map
             
-        # (B) NonThermal かつ このビン
+        # (B) NonThermal
         mask_NT = is_nonthermal & in_bin
         if np.any(mask_NT):
-            source_map = np.zeros((NY, NX))
-            np.add.at(source_map, (iy[mask_NT], ix[mask_NT]), Emission_weight[mask_NT])
-            maps['NonThermal'][label] = Density_map * source_map
+            intens_map = np.zeros((NY, NX))
+            np.add.at(intens_map, (iy[mask_NT], ix[mask_NT]), Emission_weight[mask_NT])
+            maps['NonThermal'][label] = intens_map
             
     return maps
 
