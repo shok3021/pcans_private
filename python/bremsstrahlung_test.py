@@ -1,215 +1,209 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.colors as colors
 import os
 import sys
 from scipy.constants import m_e, c, elementary_charge 
 
 # =======================================================
-# ★ 設定パラメータ
+# ★ 設定: エネルギービンと閾値
 # =======================================================
 KEV_TO_J = 1000.0 * elementary_charge
 
-# 熱的/非熱的の分離しきい値 (局所温度の何倍か)
-# マクスウェル分布の裾野(～10kTe)を超えるものを非熱的とする
+# 1. エネルギービンの定義 (keV)
+#    形式: (最小, 最大, ラベル名)
+ENERGY_BINS = [
+    (1.0, 100.0,    '001keV_100keV'),
+    (100.0, 200.0,  '100keV_200keV'),
+    (200.0, 500.0,  '200keV_500keV'),
+    (500.0, 100000.0, '500keV_over')
+]
+
+# 2. 熱的/非熱的の分離しきい値
+#    粒子エネルギー > ALPHA * (その場の温度 kB Te) なら「Non-Thermal」
 ALPHA_THRESHOLD = 10.0 
 
-# グリッド設定
+# グリッド設定 (シミュレーションに合わせて調整)
 GLOBAL_NX_GRID = 321
 GLOBAL_NY_GRID = 640
 NX = GLOBAL_NX_GRID - 1
 NY = GLOBAL_NY_GRID - 1
 DELX = 1.0
-DI_PARAM = 100.0 # プロット軸用のスキンデプス長
 
 # 座標範囲
 X_MIN, X_MAX = 0.0, NX * DELX
 Y_MIN, Y_MAX = 0.0, NY * DELX
 
 # =======================================================
-# 1. 計算エンジン: 制動放射強度マップの作成
+# 計算エンジン
 # =======================================================
-def calculate_bremsstrahlung_intensity(particle_data):
+def calculate_detailed_intensity_maps(particle_data):
     """
-    物理ベースの制動放射強度(Intensity)を計算し、
-    熱的(Thermal)と非熱的(Non-Thermal)に分離してマップ化する。
-    
-    Intensity ∝ (イオン密度) * (電子流束)
-              ∝ (N_total) * Sum(sqrt(E))
+    粒子データを以下の2軸で分類し、それぞれのIntensityマップを作成する辞書を返す
+      軸1: Thermal / NonThermal (局所温度依存)
+      軸2: Energy Bin (1-100, 100-200...)
     """
-    # --- データ展開 ---
+    # --- 1. 準備: 座標とエネルギー計算 ---
     X_pos = particle_data[:, 0]
     Y_pos = particle_data[:, 1]
     vx = particle_data[:, 2]
     vy = particle_data[:, 3]
     vz = particle_data[:, 4]
 
-    # --- エネルギー計算 (keV) ---
-    print("  -> (1/5) エネルギー計算...")
+    print("  -> Calculating energies...")
     v_sq = vx**2 + vy**2 + vz**2
     v_sq = np.clip(v_sq, 0.0, 1.0 - 1e-12)
     gamma = 1.0 / np.sqrt(1.0 - v_sq)
     E_kin_keV = ((gamma - 1.0) * m_e * c**2) / KEV_TO_J
 
-    # --- グリッド定義 ---
+    # --- 2. 局所温度・密度マップの作成 ---
+    print("  -> Generating local temperature map...")
     x_edges = np.linspace(X_MIN, X_MAX, NX + 1)
     y_edges = np.linspace(Y_MIN, Y_MAX, NY + 1)
 
-    # --- 局所温度・密度の計算 ---
-    print("  -> (2/5) 局所温度・密度マップ作成...")
-    # ヒストグラムでグリッドごとの粒子数(N)と総エネルギー(Sum E)を計算
+    # グリッドごとの粒子数(Density Proxy)
     H_count, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges])
-    H_sum_E, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges], weights=E_kin_keV)
+    Density_map = H_count 
 
-    # 平均エネルギー <E>
+    # グリッドごとの総エネルギー -> 温度計算用
+    H_sum_E, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges], weights=E_kin_keV)
+    
     with np.errstate(divide='ignore', invalid='ignore'):
         Mean_E_map = H_sum_E / H_count
         Mean_E_map[H_count == 0] = 0.0
-
+    
     # 局所温度 Te ≈ (2/3)<E>
     T_local_map = (2.0 / 3.0) * Mean_E_map
-    
-    # 密度マップ (ターゲットとなるイオン密度と仮定)
-    # ※シミュレーションの粒子重みに応じてスケールが変わりますが、相対比較には count で十分
-    Density_map = H_count 
 
-    # --- 粒子の選別 (Thermal vs Non-Thermal) ---
-    print(f"  -> (3/5) 粒子振り分け (閾値: {ALPHA_THRESHOLD} * T_local)...")
+    # --- 3. 粒子の振り分け (ベクトル化) ---
+    print("  -> Classifying particles...")
     
-    # 各粒子のグリッド座標を取得
+    # 粒子ごとのグリッド座標 (ix, iy)
     ix = np.clip(np.digitize(X_pos, x_edges) - 1, 0, NX - 1)
     iy = np.clip(np.digitize(Y_pos, y_edges) - 1, 0, NY - 1)
 
-    # 粒子の位置での温度を取得
+    # 粒子位置での温度を取得
     T_particle = T_local_map[iy, ix]
-
-    # しきい値判定
-    threshold = ALPHA_THRESHOLD * T_particle
-    is_nonthermal = (E_kin_keV > threshold) & (T_particle > 1e-6)
+    
+    # タイプ判定: Thermal vs NonThermal
+    threshold_E = ALPHA_THRESHOLD * T_particle
+    # 温度が定義できない(粒子が少ない)場所は便宜上全部NonThermal扱い等を防ぐため条件追加
+    is_nonthermal = (E_kin_keV > threshold_E) & (T_particle > 1e-6)
     is_thermal    = ~is_nonthermal
 
-    # --- 放射強度の積算 (Sum of sqrt(E)) ---
-    print("  -> (4/5) 放射強度(Intensity)の積算...")
+    # --- 4. マップの集計 ---
+    print("  -> Aggregating intensity maps...")
     
-    # 制動放射パワー P ∝ v ∝ sqrt(E)
+    # 制動放射の重み (∝ sqrt(E))
     Emission_weight = np.sqrt(E_kin_keV)
+    
+    # 結果を格納する辞書: maps[Type][BinLabel]
+    maps = {
+        'Thermal': {},
+        'NonThermal': {}
+    }
 
-    # Thermal成分の放射源項 (Sum v)
-    Source_Thermal = np.zeros((NY, NX))
-    np.add.at(Source_Thermal, (iy[is_thermal], ix[is_thermal]), Emission_weight[is_thermal])
-    
-    # Non-Thermal成分の放射源項 (Sum v)
-    Source_NonThermal = np.zeros((NY, NX))
-    np.add.at(Source_NonThermal, (iy[is_nonthermal], ix[is_nonthermal]), Emission_weight[is_nonthermal])
+    # すべてのビンに対してマップを初期化
+    for _, _, label in ENERGY_BINS:
+        maps['Thermal'][label] = np.zeros((NY, NX))
+        maps['NonThermal'][label] = np.zeros((NY, NX))
 
-    # --- 最終的なIntensityマップ ---
-    # I = Density * Source (n * Σv ∝ n^2 * sqrt(T))
-    print("  -> (5/5) マップ合成...")
-    
-    Intensity_Thermal = Density_map * Source_Thermal
-    Intensity_NonThermal = Density_map * Source_NonThermal
-
-    return Intensity_Thermal, Intensity_NonThermal
-
-# =======================================================
-# 2. 保存＆プロット関数
-# =======================================================
-def save_and_plot(map_data, label, timestep, output_base_dir):
-    # --- 保存用ディレクトリ ---
-    save_dir = os.path.join(output_base_dir, label)
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # --- TXT保存 ---
-    txt_filename = os.path.join(save_dir, f'intensity_{label}_{timestep}.txt')
-    header = (f'Bremsstrahlung Intensity Map ({label})\n'
-              f'Timestep: {timestep}\n'
-              f'Unit: Arbitrary (Density * Sum_sqrt_E)\n'
-              f'Shape: ({NY}, {NX})')
-    np.savetxt(txt_filename, map_data, header=header, fmt='%.6g')
-    print(f"    Saved TXT: {txt_filename}")
-    
-    # --- PNGプロット (確認用) ---
-    # 軸作成
-    X_axis = np.linspace(X_MIN, X_MAX, NX) / DI_PARAM
-    Y_axis = np.linspace(Y_MIN, Y_MAX, NY) / DI_PARAM
-    XX, YY = np.meshgrid(X_axis, Y_axis)
-    
-    fig, ax = plt.subplots(figsize=(8, 10)) # 縦長レイアウトに合わせて調整
-    
-    # ログスケール表示 (0以下はマスク)
-    data_plot = np.where(map_data > 1e-5, map_data, np.nan)
-    
-    cmap = 'Reds' if label == 'Thermal' else 'Blues'
-    
-    if np.nanmax(data_plot) > 0:
-        vmin = np.nanpercentile(data_plot, 5) if np.nanpercentile(data_plot, 5) > 0 else 1e-2
-        vmax = np.nanmax(data_plot)
-        norm = colors.LogNorm(vmin=vmin, vmax=vmax)
-        pcm = ax.pcolormesh(XX, YY, data_plot, cmap=cmap, norm=norm, shading='auto')
-        plt.colorbar(pcm, ax=ax, label='Intensity [a.u.]')
-    else:
-        ax.text(0.5, 0.5, 'No Signal', ha='center', transform=ax.transAxes)
-    
-    ax.set_title(f'{label} Bremsstrahlung Intensity (TS: {timestep})')
-    ax.set_xlabel('$x / d_i$')
-    ax.set_ylabel('$y / d_i$')
-    ax.set_aspect('equal')
-    
-    img_filename = os.path.join(save_dir, f'plot_{label}_{timestep}.png')
-    plt.savefig(img_filename, dpi=150)
-    plt.close()
-    # print(f"    Saved IMG: {img_filename}")
+    # ループでビンごとに処理 (メモリ節約のためビンループ)
+    for e_min, e_max, label in ENERGY_BINS:
+        # エネルギー帯域マスク
+        in_bin = (E_kin_keV >= e_min) & (E_kin_keV < e_max)
+        
+        # (A) Thermal かつ このビン
+        mask_T = is_thermal & in_bin
+        if np.any(mask_T):
+            # ソース項 (Sum sqrt(E)) を計算
+            source_map = np.zeros((NY, NX))
+            np.add.at(source_map, (iy[mask_T], ix[mask_T]), Emission_weight[mask_T])
+            # Intensity = Density * Source
+            maps['Thermal'][label] = Density_map * source_map
+            
+        # (B) NonThermal かつ このビン
+        mask_NT = is_nonthermal & in_bin
+        if np.any(mask_NT):
+            source_map = np.zeros((NY, NX))
+            np.add.at(source_map, (iy[mask_NT], ix[mask_NT]), Emission_weight[mask_NT])
+            maps['NonThermal'][label] = Density_map * source_map
+            
+    return maps
 
 # =======================================================
-# 3. メイン実行部
+# 保存関数 (TXTのみ)
+# =======================================================
+def save_category_txt(maps_dict, timestep, output_base):
+    """
+    辞書に入ったマップをTXTファイルとして保存する (画像プロットなし)
+    """
+    for particle_type in ['Thermal', 'NonThermal']:
+        type_dir = os.path.join(output_base, particle_type)
+        os.makedirs(type_dir, exist_ok=True)
+        
+        for e_min, e_max, bin_label in ENERGY_BINS:
+            
+            intensity_map = maps_dict[particle_type][bin_label]
+            
+            # --- TXT保存 ---
+            # フォルダ階層: output/Thermal/100-200keV/intensity_...
+            bin_dir = os.path.join(type_dir, bin_label)
+            os.makedirs(bin_dir, exist_ok=True)
+            
+            txt_name = f'intensity_{particle_type}_{bin_label}_{timestep}.txt'
+            txt_path = os.path.join(bin_dir, txt_name)
+            
+            header = (f'Bremsstrahlung Intensity Map\n'
+                      f'Type: {particle_type}\n'
+                      f'Energy Bin: {bin_label} ({e_min}-{e_max} keV)\n'
+                      f'Timestep: {timestep}\n'
+                      f'Shape: ({NY}, {NX})')
+            
+            # データが空(ゼロ)でも保存する（プロッターがエラーにならないように）
+            np.savetxt(txt_path, intensity_map, header=header, fmt='%.6g')
+            print(f"    Saved TXT: {particle_type} - {bin_label}")
+
+# =======================================================
+# メイン
 # =======================================================
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python bremsstrahlung_intensity.py [start] [end] [step]")
+        print("Usage: python detailed_brems_txt_only.py [start] [end] [step]")
         sys.exit(1)
-    
+        
     start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-
-    # パス設定
+    
+    # ディレクトリ設定
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')
     
-    # データ読み込み元
     DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_detailed_intensity')
     
-    # 出力先
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_intensity_txt')
+    print(f"--- Detailed Bremsstrahlung Extraction (TXT Only) ---")
+    print(f"Output: {OUTPUT_DIR}")
     
-    print(f"--- Bremsstrahlung Intensity Calculation ---")
-    print(f"Output Directory: {OUTPUT_DIR}")
-
     for t_int in range(start, end + step, step):
         ts = f"{t_int:06d}"
-        filename = f'{ts}_0160-0320_psd_e.dat'
-        filepath = os.path.join(DATA_DIR, filename)
-
-        print(f"\n=== Processing TimeStep: {ts} ===")
+        print(f"\n=== Processing TS: {ts} ===")
         
-        if not os.path.exists(filepath):
-            print(f"  Skip: {filename} not found.")
+        fpath = os.path.join(DATA_DIR, f'{ts}_0160-0320_psd_e.dat')
+        if not os.path.exists(fpath):
+            print("  File not found.")
             continue
-
+            
         try:
-            data = np.loadtxt(filepath)
+            data = np.loadtxt(fpath)
             if data.size == 0: continue
             if data.ndim == 1: data = data.reshape(1, -1)
-        except:
-            print("  Error loading file.")
-            continue
+        except: continue
+        
+        # 計算
+        result_maps = calculate_detailed_intensity_maps(data)
+        
+        # 保存 (TXTのみ)
+        save_category_txt(result_maps, ts, OUTPUT_DIR)
 
-        # 計算実行
-        Int_T, Int_NT = calculate_bremsstrahlung_intensity(data)
-
-        # 保存とプロット
-        save_and_plot(Int_T, 'Thermal', ts, OUTPUT_DIR)
-        save_and_plot(Int_NT, 'NonThermal', ts, OUTPUT_DIR)
-
-    print("\n--- All Finished ---")
+    print("\nDone.")
 
 if __name__ == "__main__":
     main()

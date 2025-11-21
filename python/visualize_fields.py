@@ -110,24 +110,25 @@ print(f"--- 規格化スケール (磁場): B0 = {B0:.4f}")
 print(f"--- 規格化スケール (速度): VA0 = {VA0:.4f}")
 print(f"--- 時間スケール: dt = {DT}, Fgi (Omega_ci) = {FGI}")
 
+# ★★★ 設定変更: Proxy -> Te, Ti に変更 ★★★
 GLOBAL_PLOT_RANGES = {
     'Bx': (-1.0, 1.0),
-    'By': (-1.0, 1.0),
-    'Bz': (-0.3, 0.3),
+    'By': (-1.5, 1.5),
+    'Bz': (-0.5, 0.5),
     'Ex': (-0.3, 0.3),
-    'Ey': (-0.03, 0.03),
-    'Ez': (-0.03, 0.03),
-    'Jx': (-0.3, 0.3),
-    'Jy': (-0.5, 0.5),
-    'Jz': (-1.0, 1.0),
+    'Ey': (-0.05, 0.05),
+    'Ez': (-0.1, 0.1),
+    'Jx': (-0.5, 0.5),
+    'Jy': (-0.75, 0.75),
+    'Jz': (-1.75, 1.75),
     'ne': (0, 500),
     'ni': (0, 500),
     'Psi': (-5000, 5000), 
-    'Te_proxy': (0, 0.3),   
-    'Ti_proxy': (0, 0.03),  
+    'Te': (0, 5),   # ★ Te Proxyより少しレンジを調整 (必要に応じて変更してください)
+    'Ti': (0, 5),   # ★ Ti
     'Vxe': (-1.0, 1.0),
     'Vxi': (-0.5, 0.5),
-    'Vye': (-2.0, 2.0),
+    'Vye': (-2.5, 2.5),
     'Vyi': (-1.0, 1.0),
     'Vze': (-4.0, 4.0),
     'Vzi': (-2.0, 2.0),
@@ -225,7 +226,6 @@ def get_plot_range(Z, tag=None):
 # プロット関数
 # =======================================================
 
-# --- ★★★ plot_single_panel の修正 (ticks 設定) ★★★ ---
 def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu_r', vmin=None, vmax=None, tag_key=None):
     if vmin is None: vmin = Z.min()
     if vmax is None: vmax = Z.max()
@@ -243,16 +243,17 @@ def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu
          
     # --- 目盛りの手動設定 ---
     plot_ticks = None
-    if tag_key in ['ne', 'ni', 'Te_proxy', 'Ti_proxy', 'Psi']: # 0 または非対称の可能性があるもの
+    # ★ Te, Ti もここに追加
+    if tag_key in ['ne', 'ni', 'Te', 'Ti', 'Psi']: 
         num_ticks = 6 
     else: # 対称なもの
-        num_ticks = 7 # (例: -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3)
+        num_ticks = 7 
         
     if not np.isclose(vmin, vmax):
         plot_ticks = np.linspace(vmin, vmax, num_ticks)
     # ---
 
-    cbar = plt.colorbar(cf, ax=ax, format=formatter_str, ticks=plot_ticks) # ★ ticks を指定
+    cbar = plt.colorbar(cf, ax=ax, format=formatter_str, ticks=plot_ticks)
     
     cbar.set_label(label)
     stride_x = max(1, Bx.shape[1] // 30) 
@@ -276,7 +277,7 @@ def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu
     ax.set_title(title)
     ax.tick_params(direction='in', top=True, right=True)
 
-# --- ★★★ plot_combined の修正 (ticks 設定) ★★★ ---
+
 def plot_combined(ax, X, Y, Z, Bx, By, title, label, cmap, vmin, vmax, tag_key, stream_color='gray', stream_density=1.0):
     
     if np.isclose(vmin, vmax):
@@ -291,18 +292,15 @@ def plot_combined(ax, X, Y, Z, Bx, By, title, label, cmap, vmin, vmax, tag_key, 
     if (vmax > 0 and np.abs(vmax) < 0.01) or np.abs(vmax) > 1000:
          formatter_str = '%.1e'
          
-    # --- 目盛りの手動設定 (combined 用) ---
-    # こちらはスペースが小さいので目盛りは少なめに (5個)
     plot_ticks = None
     num_ticks = 5 
     
     if not np.isclose(vmin, vmax):
         plot_ticks = np.linspace(vmin, vmax, num_ticks)
-    # ---
 
     cbar = plt.colorbar(cf, ax=ax, format=formatter_str, 
                         shrink=0.9, aspect=30, pad=0.02,
-                        ticks=plot_ticks) # ★ ticks を指定
+                        ticks=plot_ticks)
     
     cbar.set_label(label, fontsize=7)
     cbar.ax.tick_params(labelsize=6)
@@ -360,6 +358,11 @@ def process_timestep(timestep):
     Vyi_raw = load_2d_moment_data(timestep, 'ion', 'Vy')
     Vzi_raw = load_2d_moment_data(timestep, 'ion', 'Vz')
     
+    # ★★★ 温度データの読み込み (追加) ★★★
+    # 前回のスクリプトで保存した 'T' ファイルを読み込む
+    Te_raw = load_2d_moment_data(timestep, 'electron', 'T')
+    Ti_raw = load_2d_moment_data(timestep, 'ion', 'T')
+    
     ne_count = load_2d_moment_data(timestep, 'electron', 'density_count')
     ni_count = load_2d_moment_data(timestep, 'ion', 'density_count')
     
@@ -388,8 +391,14 @@ def process_timestep(timestep):
     
     Psi = calculate_magnetic_flux(Bx_raw, By_raw, DELX)
     
-    Te_proxy = Vxe_raw**2 + Vye_raw**2 + Vze_raw**2
-    Ti_proxy = Vxi_raw**2 + Vyi_raw**2 + Vzi_raw**2
+    # ★★★ 温度の規格化 ★★★
+    # 温度(速度の二乗)を VA0^2 で規格化する
+    Te = Te_raw / (VA0**2)
+    Ti = Ti_raw / (VA0**2)
+    
+    # Proxy計算部分は削除
+    # Te_proxy = ... 
+    # Ti_proxy = ...
     
     J_data = {'density_count_e': ne, 'density_count_i': ni,
               'Vx_e': Vxe_raw, 'Vx_i': Vxi_raw, 
@@ -410,7 +419,8 @@ def process_timestep(timestep):
 
     # --- 4. 可視化実行 ---
     
-    # (a) 個別プロット用のリスト (tag_key, Z, title, label, cmap)
+    # (a) 個別プロット用のリスト 
+    # ★ Te_proxy -> Te, Ti_proxy -> Ti に変更
     plot_components = [
         ('Bx', Bx, r'Magnetic Field ($B_x/B_0$)', r'$B_x/B_0$', plt.cm.RdBu_r),
         ('By', By, r'Magnetic Field ($B_y/B_0$)', r'$B_y/B_0$', plt.cm.RdBu_r),
@@ -419,9 +429,9 @@ def process_timestep(timestep):
         ('Ey', Ey, r'Electric Field ($E_y/B_0$)', r'$E_y/B_0$', plt.cm.coolwarm),
         ('Ez', Ez, r'Electric Field ($E_z/B_0$)', r'$E_z/B_0$', plt.cm.coolwarm),
         ('ne', ne, 'Electron Density', r'$n_e$ (Counts)', plt.cm.viridis),
-        ('Te_proxy', Te_proxy, 'Electron Temperature (Proxy)', r'$T_e$ (Proxy)', plt.cm.plasma),
+        ('Te', Te, 'Electron Temperature', r'$T_e / (m_e V_{A0}^2)$', plt.cm.plasma), # ★
         ('ni', ni, 'Ion Density', r'$n_i$ (Counts)', plt.cm.viridis),
-        ('Ti_proxy', Ti_proxy, 'Ion Temperature (Proxy)', r'$T_i$ (Proxy)', plt.cm.plasma),
+        ('Ti', Ti, 'Ion Temperature', r'$T_i / (m_i V_{A0}^2)$', plt.cm.plasma),      # ★
         ('Psi', Psi, r'Magnetic Flux $\Psi$', r'$\Psi$', plt.cm.seismic),
         ('Jx', Jx, 'Current Density (Jx)', r'$J_x$', plt.cm.RdBu_r),
         ('Jy', Jy, 'Current Density (Jy)', r'$J_y$', plt.cm.RdBu_r),
@@ -449,12 +459,12 @@ def process_timestep(timestep):
             vmin, vmax = get_plot_range(Z, tag=tag_key)
         
         fig, ax = plt.subplots(figsize=(10, 8))
-        # --- ★★★ plot_single_panel 呼び出し修正 (tag_key 追加) ★★★ ---
+        
         plot_single_panel(ax, X, Y, Z, Bx, By,
                           f"Timestep {timestep}: {title}", label, 
                           omega_t_str, cmap=cmap, 
                           vmin=vmin, vmax=vmax,
-                          tag_key=tag_key) # ★ tag_key を渡す
+                          tag_key=tag_key)
         
         fig.tight_layout()
         output_filename = os.path.join(SUB_DIR, f'plot_{timestep}_{tag_key}.png')
@@ -470,7 +480,8 @@ def process_timestep(timestep):
     ax_list = axes.flatten()
     fig.suptitle(f"Timestep: {timestep}  ({omega_t_str})", fontsize=16, fontweight='bold')
     
-    # (b) 統合パネル用のリスト (tag_key, Z, title, label, cmap)
+    # (b) 統合パネル用のリスト
+    # ★ Te_proxy -> Te, Ti_proxy -> Ti に変更
     combined_plots = [
         ('Bx', Bx, r'(a) $B_x/B_0$', r'$B_x/B_0$', plt.cm.RdBu_r),
         ('By', By, r'(b) $B_y/B_0$', r'$B_y/B_0$', plt.cm.RdBu_r),
@@ -487,11 +498,11 @@ def process_timestep(timestep):
         ('Vxi', Vxi, r'(m) $V_{ix}/V_{A0}$', r'$V_{ix}/V_{A0}$', plt.cm.RdBu_r),
         ('Vyi', Vyi, r'(n) $V_{iy}/V_{A0}$)', r'$V_{iy}/V_{A0}$', plt.cm.RdBu_r),
         ('Vzi', Vzi, r'(o) $V_{iz}/V_{A0}$)', r'$V_{iz}/V_{A0}$', plt.cm.RdBu_r),
-        ('Ti_proxy', Ti_proxy, '(p) $T_i$ (Proxy)', r'$T_i$', plt.cm.plasma), 
+        ('Ti', Ti, '(p) $T_i$', r'$T_i$', plt.cm.plasma),          # ★
         ('Vxe', Vxe, r'(q) $V_{ex}/V_{A0}$)', r'$V_{ex}/V_{A0}$', plt.cm.RdBu_r),
         ('Vye', Vye, r'(r) $V_{ey}/V_{A0}$)', r'$V_{ey}/V_{A0}$', plt.cm.RdBu_r),
         ('Vze', Vze, r'(s) $V_{ez}/V_{A0}$)', r'$V_{ez}/V_{A0}$', plt.cm.RdBu_r),
-        ('Te_proxy', Te_proxy, '(t) $T_e$ (Proxy)', r'$T_e$', plt.cm.plasma),
+        ('Te', Te, '(t) $T_e$', r'$T_e$', plt.cm.plasma),          # ★
     ]
     
     for i, (tag_key, Z, title, label, cmap) in enumerate(combined_plots):
