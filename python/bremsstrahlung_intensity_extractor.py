@@ -1,251 +1,209 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.colors as colors
 import os
 import sys
-import glob
+from scipy.constants import m_e, c, elementary_charge 
 
 # =======================================================
-# 1. シミュレーションパラメータの読み込み
+# ★ 設定: エネルギービンと閾値
 # =======================================================
-def load_simulation_parameters(param_filepath):
-    params = {}
-    print(f"Loading parameters from: {param_filepath}")
+KEV_TO_J = 1000.0 * elementary_charge
 
-    try:
-        with open(param_filepath, 'r') as f:
-            for line in f:
-                if "=>" in line:
-                    parts = line.split("=>")
-                    key_part = parts[0].strip()
-                    value_part = parts[1].strip().replace('x', ' ')
-                    values = value_part.split()
-                    
-                    if not values: continue
+# 1. エネルギービンの定義 (keV)
+#    形式: (最小, 最大, ラベル名)
+ENERGY_BINS = [
+    (1.0, 100.0,    '001keV_100keV'),
+    (100.0, 200.0,  '100keV_200keV'),
+    (200.0, 500.0,  '200keV_500keV'),
+    (500.0, 100000.0, '500keV_over')
+]
 
-                    if key_part.startswith('grid size'):
-                        params['NX_GRID_POINTS'] = int(values[0])
-                        params['NY_GRID_POINTS'] = int(values[1])
-                    elif key_part.startswith('dx, dt, c'):
-                        params['DELX'] = float(values[0])
-                        params['DT'] = float(values[1])
-                        params['C_LIGHT'] = float(values[2])
-                    elif key_part.startswith('Mi, Me'):
-                        params['MI'] = float(values[0])
-                    elif key_part.startswith('Qi, Qe'):
-                        params['QI'] = float(values[0])
-                    elif key_part.startswith('Fpe, Fge, Fpi Fgi'):
-                        params['FPI'] = float(values[2])
-                        params['FGI'] = float(values[3])
-    except FileNotFoundError:
-        print(f"Error: Parameter file not found at {param_filepath}")
-        # デフォルト値（読み込み失敗時用）
-        return {'NX_PHYS': 320, 'NY_PHYS': 639, 'DELX': 1.0, 'DI': 100.0, 'B0': 1.0}
+# 2. 熱的/非熱的の分離しきい値
+#    粒子エネルギー > ALPHA * (その場の温度 kB Te) なら「Non-Thermal」
+ALPHA_THRESHOLD = 10.0 
 
-    # 物理グリッド数
-    params['NX_PHYS'] = params['NX_GRID_POINTS'] - 1
-    params['NY_PHYS'] = params['NY_GRID_POINTS'] - 1
-    
-    # 物理長 (d_i) と磁場 (B0) の計算
-    if params.get('FPI', 0) > 0:
-        params['DI'] = params['C_LIGHT'] / params['FPI']
-    else:
-        params['DI'] = 100.0 # Default fallback
+# グリッド設定 (シミュレーションに合わせて調整)
+GLOBAL_NX_GRID = 321
+GLOBAL_NY_GRID = 640
+NX = GLOBAL_NX_GRID - 1
+NY = GLOBAL_NY_GRID - 1
+DELX = 1.0
 
-    if params.get('QI', 0) != 0:
-        params['B0'] = (params['FGI'] * params['MI'] * params['C_LIGHT']) / params['QI']
-    else:
-        params['B0'] = 1.0
-
-    print(f"  -> Grid: {params['NX_PHYS']} x {params['NY_PHYS']}")
-    print(f"  -> d_i: {params['DI']:.2f}")
-    
-    return params
+# 座標範囲
+X_MIN, X_MAX = 0.0, NX * DELX
+Y_MIN, Y_MAX = 0.0, NY * DELX
 
 # =======================================================
-# 2. データ読み込みヘルパー
+# 計算エンジン
 # =======================================================
-def load_2d_map(filepath):
-    try:
-        data = np.loadtxt(filepath)
-        # 1次元配列になってしまった場合の処置
-        if data.ndim == 1 and data.size > 0:
-             # 正方形に近い形状を推測するか、パラメータ情報が必要
-             pass 
-        return data
-    except Exception as e:
-        print(f"Error loading {filepath}: {e}")
-        return None
+def calculate_detailed_intensity_maps(particle_data):
+    """
+    粒子データを以下の2軸で分類し、それぞれのIntensityマップを作成する辞書を返す
+      軸1: Thermal / NonThermal (局所温度依存)
+      軸2: Energy Bin (1-100, 100-200...)
+    """
+    # --- 1. 準備: 座標とエネルギー計算 ---
+    X_pos = particle_data[:, 0]
+    Y_pos = particle_data[:, 1]
+    vx = particle_data[:, 2]
+    vy = particle_data[:, 3]
+    vz = particle_data[:, 4]
 
-def load_field_data(timestep, component, field_dir, ny, nx):
-    """磁場データの読み込み (streamplot用)"""
-    filename = f'data_{timestep}_{component}.txt'
-    path = os.path.join(field_dir, filename)
-    if not os.path.exists(path):
-        return None
-    try:
-        data = np.loadtxt(path, delimiter=',')
-        if data.shape == (ny, nx):
-            return data
-    except:
-        pass
-    return None
+    print("  -> Calculating energies...")
+    v_sq = vx**2 + vy**2 + vz**2
+    v_sq = np.clip(v_sq, 0.0, 1.0 - 1e-12)
+    gamma = 1.0 / np.sqrt(1.0 - v_sq)
+    E_kin_keV = ((gamma - 1.0) * m_e * c**2) / KEV_TO_J
 
-# =======================================================
-# 3. プロット実行関数
-# =======================================================
-def plot_intensity_map(txt_path, particle_type, bin_label, timestep, params, field_dir, output_dir):
+    # --- 2. 局所温度・密度マップの作成 ---
+    print("  -> Generating local temperature map...")
+    x_edges = np.linspace(X_MIN, X_MAX, NX + 1)
+    y_edges = np.linspace(Y_MIN, Y_MAX, NY + 1)
+
+    # グリッドごとの粒子数(Density Proxy)
+    H_count, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges])
+    Density_map = H_count 
+
+    # グリッドごとの総エネルギー -> 温度計算用
+    H_sum_E, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_edges, x_edges], weights=E_kin_keV)
     
-    # --- データ読み込み ---
-    intensity_map = load_2d_map(txt_path)
-    if intensity_map is None: return
-
-    NX = params['NX_PHYS']
-    NY = params['NY_PHYS']
+    with np.errstate(divide='ignore', invalid='ignore'):
+        Mean_E_map = H_sum_E / H_count
+        Mean_E_map[H_count == 0] = 0.0
     
-    # 形状チェック (読み込んだデータとパラメータが一致するか)
-    if intensity_map.shape != (NY, NX):
-        print(f"Warning: Shape mismatch. Data: {intensity_map.shape}, Params: ({NY}, {NX}). Skipping.")
-        return
+    # 局所温度 Te ≈ (2/3)<E>
+    T_local_map = (2.0 / 3.0) * Mean_E_map
 
-    # --- 座標作成 (d_i単位) ---
-    x_axis = np.linspace(0, NX * params['DELX'], NX) / params['DI']
-    y_axis = np.linspace(0, NY * params['DELX'], NY) / params['DI']
-    XX, YY = np.meshgrid(x_axis, y_axis)
+    # --- 3. 粒子の振り分け (ベクトル化) ---
+    print("  -> Classifying particles...")
+    
+    # 粒子ごとのグリッド座標 (ix, iy)
+    ix = np.clip(np.digitize(X_pos, x_edges) - 1, 0, NX - 1)
+    iy = np.clip(np.digitize(Y_pos, y_edges) - 1, 0, NY - 1)
 
-    # --- 磁場データ (あれば読み込み) ---
-    Bx = load_field_data(timestep, 'Bx', field_dir, NY, NX)
-    By = load_field_data(timestep, 'By', field_dir, NY, NX)
+    # 粒子位置での温度を取得
+    T_particle = T_local_map[iy, ix]
+    
+    # タイプ判定: Thermal vs NonThermal
+    threshold_E = ALPHA_THRESHOLD * T_particle
+    # 温度が定義できない(粒子が少ない)場所は便宜上全部NonThermal扱い等を防ぐため条件追加
+    is_nonthermal = (E_kin_keV > threshold_E) & (T_particle > 1e-6)
+    is_thermal    = ~is_nonthermal
 
-    # --- プロット設定 ---
-    fig, ax = plt.subplots(figsize=(8, 10))
+    # --- 4. マップの集計 ---
+    print("  -> Aggregating intensity maps...")
     
-    # カラーマップ: Thermal=Red, NonThermal=Blue
-    cmap_name = 'Reds' if particle_type == 'Thermal' else 'Blues'
+    # 制動放射の重み (∝ sqrt(E))
+    Emission_weight = np.sqrt(E_kin_keV)
     
-    # ログスケール表示の前処理 (0以下をNaNにしてマスク)
-    data_plot = np.where(intensity_map > 1e-8, intensity_map, np.nan)
-    
-    # 何もデータがない(真っ黒)場合の処理
-    if np.all(np.isnan(data_plot)):
-        print(f"  -> Empty map (No signal). Generating blank plot.")
-        ax.text(0.5, 0.5, 'No Signal', ha='center', va='center', transform=ax.transAxes)
-        # 便宜上の空プロット
-        norm = colors.Normalize(vmin=0, vmax=1)
-        pcm = ax.pcolormesh(XX, YY, np.zeros_like(XX), cmap=cmap_name, norm=norm, shading='auto')
-    else:
-        # ダイナミックレンジの自動調整
-        max_val = np.nanmax(data_plot)
-        min_val = np.nanmin(data_plot)
+    # 結果を格納する辞書: maps[Type][BinLabel]
+    maps = {
+        'Thermal': {},
+        'NonThermal': {}
+    }
+
+    # すべてのビンに対してマップを初期化
+    for _, _, label in ENERGY_BINS:
+        maps['Thermal'][label] = np.zeros((NY, NX))
+        maps['NonThermal'][label] = np.zeros((NY, NX))
+
+    # ループでビンごとに処理 (メモリ節約のためビンループ)
+    for e_min, e_max, label in ENERGY_BINS:
+        # エネルギー帯域マスク
+        in_bin = (E_kin_keV >= e_min) & (E_kin_keV < e_max)
         
-        # あまりに範囲が狭い、あるいは小さすぎる場合は調整
-        if min_val <= 0 or not np.isfinite(min_val): min_val = 1e-4
-        if max_val <= min_val: max_val = min_val * 10.0
-        
-        # 下位側を少し切ってノイズを消す (percentile)
-        robust_min = np.nanpercentile(data_plot, 1)
-        if robust_min > min_val: min_val = robust_min
-
-        norm = colors.LogNorm(vmin=min_val, vmax=max_val)
-        
-        # メインプロット
-        pcm = ax.pcolormesh(XX, YY, data_plot, cmap=cmap_name, norm=norm, shading='auto')
-        
-        # カラーバー
-        cbar = plt.colorbar(pcm, ax=ax, pad=0.02)
-        cbar.set_label(f'{particle_type} Intensity [a.u.]')
-
-    # --- 磁力線の重ね書き (オプション) ---
-    if Bx is not None and By is not None:
-        # 間引きして表示
-        st = max(1, NX // 40)
-        B_norm = np.sqrt(Bx**2 + By**2)
-        # 磁場が弱すぎる場所は描かない等の処理も可能だが、ここではそのまま
-        ax.streamplot(XX[::st, ::st], YY[::st, ::st], 
-                      Bx[::st, ::st], By[::st, ::st], 
-                      color='black', linewidth=0.5, arrowsize=0.6, density=1.0)
-
-    # --- 装飾 ---
-    ax.set_title(f'{particle_type} Bremsstrahlung ({bin_label})\nTime Step: {timestep}')
-    ax.set_xlabel('$x / d_i$')
-    ax.set_ylabel('$y / d_i$')
-    ax.set_aspect('equal')
-    
-    # --- 保存 ---
-    # 保存先: bremsstrahlung_plots_detailed/Thermal/100-200keV/plot_...
-    save_dir = os.path.join(output_dir, particle_type, bin_label)
-    os.makedirs(save_dir, exist_ok=True)
-    
-    filename = f'plot_{particle_type}_{bin_label}_{timestep}.png'
-    save_path = os.path.join(save_dir, filename)
-    
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"  -> Saved: {save_path}")
+        # (A) Thermal かつ このビン
+        mask_T = is_thermal & in_bin
+        if np.any(mask_T):
+            # ソース項 (Sum sqrt(E)) を計算
+            source_map = np.zeros((NY, NX))
+            np.add.at(source_map, (iy[mask_T], ix[mask_T]), Emission_weight[mask_T])
+            # Intensity = Density * Source
+            maps['Thermal'][label] = Density_map * source_map
+            
+        # (B) NonThermal かつ このビン
+        mask_NT = is_nonthermal & in_bin
+        if np.any(mask_NT):
+            source_map = np.zeros((NY, NX))
+            np.add.at(source_map, (iy[mask_NT], ix[mask_NT]), Emission_weight[mask_NT])
+            maps['NonThermal'][label] = Density_map * source_map
+            
+    return maps
 
 # =======================================================
-# 4. メインループ
+# 保存関数 (TXTのみ)
+# =======================================================
+def save_category_txt(maps_dict, timestep, output_base):
+    """
+    辞書に入ったマップをTXTファイルとして保存する (画像プロットなし)
+    """
+    for particle_type in ['Thermal', 'NonThermal']:
+        type_dir = os.path.join(output_base, particle_type)
+        os.makedirs(type_dir, exist_ok=True)
+        
+        for e_min, e_max, bin_label in ENERGY_BINS:
+            
+            intensity_map = maps_dict[particle_type][bin_label]
+            
+            # --- TXT保存 ---
+            # フォルダ階層: output/Thermal/100-200keV/intensity_...
+            bin_dir = os.path.join(type_dir, bin_label)
+            os.makedirs(bin_dir, exist_ok=True)
+            
+            txt_name = f'intensity_{particle_type}_{bin_label}_{timestep}.txt'
+            txt_path = os.path.join(bin_dir, txt_name)
+            
+            header = (f'Bremsstrahlung Intensity Map\n'
+                      f'Type: {particle_type}\n'
+                      f'Energy Bin: {bin_label} ({e_min}-{e_max} keV)\n'
+                      f'Timestep: {timestep}\n'
+                      f'Shape: ({NY}, {NX})')
+            
+            # データが空(ゼロ)でも保存する（プロッターがエラーにならないように）
+            np.savetxt(txt_path, intensity_map, header=header, fmt='%.6g')
+            print(f"    Saved TXT: {particle_type} - {bin_label}")
+
+# =======================================================
+# メイン
 # =======================================================
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python bremsstrahlung_plotter_detailed.py [start] [end] [step]")
+        print("Usage: python detailed_brems_txt_only.py [start] [end] [step]")
         sys.exit(1)
-
-    start_step, end_step, step_size = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
-
-    # --- パス設定 ---
+        
+    start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+    
+    # ディレクトリ設定
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')
-
-    # パラメータファイル
-    PARAM_FILE = '/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat'
     
-    # 入力ディレクトリ (さっき作ったTXTデータの場所)
-    DATA_BASE_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_detailed_intensity')
+    DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_detailed_intensity')
     
-    # 磁場データディレクトリ (streamplot用、もしあれば)
-    FIELD_DIR = os.path.join(SCRIPT_DIR, 'extracted_data')
+    print(f"--- Detailed Bremsstrahlung Extraction (TXT Only) ---")
+    print(f"Output: {OUTPUT_DIR}")
     
-    # 出力ディレクトリ (画像の保存先)
-    PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_plots_detailed')
-
-    print(f"--- Bremsstrahlung Plotter (Detailed) ---")
-    print(f"Input Data: {DATA_BASE_DIR}")
-    print(f"Output Plots: {PLOT_BASE_DIR}")
-
-    # パラメータ読み込み
-    params = load_simulation_parameters(PARAM_FILE)
-
-    # タイムステップループ
-    for t_int in range(start_step, end_step + step_size, step_size):
-        timestep = f"{t_int:06d}"
-        print(f"\n=== Processing TS: {timestep} ===")
+    for t_int in range(start, end + step, step):
+        ts = f"{t_int:06d}"
+        print(f"\n=== Processing TS: {ts} ===")
         
-        # フォルダ探索: Thermal / NonThermal
-        for p_type in ['Thermal', 'NonThermal']:
-            type_dir = os.path.join(DATA_BASE_DIR, p_type)
-            if not os.path.exists(type_dir): continue
+        fpath = os.path.join(DATA_DIR, f'{ts}_0160-0320_psd_e.dat')
+        if not os.path.exists(fpath):
+            print("  File not found.")
+            continue
             
-            # その中のエネルギービンフォルダを探索
-            # 構造: .../Thermal/001-100keV/*.txt
-            bin_dirs = glob.glob(os.path.join(type_dir, '*'))
-            
-            for b_dir in bin_dirs:
-                if not os.path.isdir(b_dir): continue
-                
-                bin_label = os.path.basename(b_dir)
-                
-                # 該当するタイムステップのTXTファイルを探す
-                # ファイル名規則: intensity_{p_type}_{bin_label}_{timestep}.txt
-                target_file = os.path.join(b_dir, f'intensity_{p_type}_{bin_label}_{timestep}.txt')
-                
-                if os.path.exists(target_file):
-                    plot_intensity_map(
-                        target_file, p_type, bin_label, timestep,
-                        params, FIELD_DIR, PLOT_BASE_DIR
-                    )
+        try:
+            data = np.loadtxt(fpath)
+            if data.size == 0: continue
+            if data.ndim == 1: data = data.reshape(1, -1)
+        except: continue
+        
+        # 計算
+        result_maps = calculate_detailed_intensity_maps(data)
+        
+        # 保存 (TXTのみ)
+        save_category_txt(result_maps, ts, OUTPUT_DIR)
 
-    print("\n--- All Done ---")
+    print("\nDone.")
 
 if __name__ == "__main__":
     main()
