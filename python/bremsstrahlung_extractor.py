@@ -12,56 +12,49 @@ KEV_TO_J = 1000.0 * elementary_charge
 
 # ★ ご要望に合わせてエネルギービン (keV) を更新
 ENERGY_BINS_KEV = [
-    (1.0, 5.0,   '01keV_05keV'),
-    (5.0, 10.0,  '05keV_10keV'),
-    (10.0, 15.0, '10keV_15keV'),
-    (15.0, 20.0, '15keV_20keV'), # (10-15 と 20-25 の間を補完)
-    (20.0, 25.0, '20keV_25keV'),
-    (25.0, 30.0, '25keV_30keV'),
-    # (以下、必要に応じて 5keV ごとにビニングを追加してください)
-    (30.0, 500.0, '30keV_over') # 30keV以上 (上限は適当に設定)
+    (1.0, 50.0,     '001keV_050keV'),
+    (50.0, 100.0,   '050keV_100keV'),
+    (100.0, 500.0,  '100keV_500keV'),
+    (500.0, 100000.0, '500keV_over') # 500keV以上 (上限は十分に大きく設定)
 ]
 
-print("--- エネルギービン設定 (更新版) ---")
+print("--- エネルギービン設定 (更新版: Intensity Mode) ---")
 for e_min, e_max, label in ENERGY_BINS_KEV:
     print(f"  {label}: [{e_min}, {e_max}) keV")
 print("---------------------------------")
 
 
 # =======================================================
-# ★ ステップ2: グローバル定数を設定 (★ 座標系を [0, 320] に修正)
+# ★ ステップ2: グローバル定数を設定
 # =======================================================
-# (ご提示いただいた psd_extractor_revised.py の定義に合わせる)
 GLOBAL_NX_GRID_POINTS = 321
 GLOBAL_NY_GRID_POINTS = 640
 
-# 物理領域のグリッド数 (セル数: Grid Points - 1)
+# 物理領域のグリッド数 (セル数)
 GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 # 320 セル
 GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 # 639 セル
 DELX = 1.0
 
-# ★★★ 座標範囲を [0, 320] x [0, 639] に修正 ★★★
+# 座標範囲 [0, 320] x [0, 639]
 X_MIN = 0.0
 X_MAX = GLOBAL_NX_PHYS * DELX # 320.0
 Y_MIN = 0.0
 Y_MAX = GLOBAL_NY_PHYS * DELX # 639.0
 
-print(f"--- グリッド設定 (修正版) ---")
+print(f"--- グリッド設定 ---")
 print(f"X方向物理セル数: {GLOBAL_NX_PHYS}, Y方向物理セル数: {GLOBAL_NY_PHYS}")
 print(f"★ 空間範囲: X=[{X_MIN}, {X_MAX}], Y=[{Y_MIN}, {Y_MAX}] (セル幅: {DELX})")
 
 
 # =======================================================
-# ★ ステップ3: 抽出・計算関数 (エネルギービン別カウント)
+# ★ ステップ3: 抽出・計算関数 (エネルギービン別 Intensity)
 # =======================================================
 def calculate_xray_proxy_binned(particle_data):
     """
-    粒子の生データからエネルギーを計算し、
-    エネルギービン別に2Dマップにカウントする。
-    (グローバル変数 NX, NY, X_MIN, X_MAX などを使用)
+    粒子の生データからエネルギーを計算し、エネルギービン別に2Dマップを作成する。
+    ★ 修正: カウント(個数)ではなく、エネルギーの総和(Intensity proxy)を計算。
     """
     
-    # グローバル変数を使用
     NX = GLOBAL_NX_PHYS
     NY = GLOBAL_NY_PHYS
     x_min, x_max = X_MIN, X_MAX
@@ -71,10 +64,10 @@ def calculate_xray_proxy_binned(particle_data):
     X_pos = particle_data[:, 0]
     Y_pos = particle_data[:, 1]
     
-    # ★ 2,3,4列目は v/c (規格化速度) と仮定
-    v_norm_x = particle_data[:, 2] # vx/c
-    v_norm_y = particle_data[:, 3] # vy/c
-    v_norm_z = particle_data[:, 4] # vz/c
+    # v/c (規格化速度)
+    v_norm_x = particle_data[:, 2]
+    v_norm_y = particle_data[:, 3]
+    v_norm_z = particle_data[:, 4]
     
     N_total = len(X_pos) 
 
@@ -86,6 +79,7 @@ def calculate_xray_proxy_binned(particle_data):
     gamma = 1.0 / np.sqrt(1.0 - v_norm_sq)
     E_kin_J = (gamma - 1.0) * m_e * (c**2)
     E_kin_keV = E_kin_J / KEV_TO_J
+    
     if N_total > 0:
         print(f"  -> エネルギー範囲 (keV): [{np.min(E_kin_keV):.2f}, {np.max(E_kin_keV):.2f}]")
     else:
@@ -94,7 +88,6 @@ def calculate_xray_proxy_binned(particle_data):
 
     # --- 2. 空間インデックス計算 ---
     print("  -> (2/4) 空間グリッドへのインデックスを計算中...")
-    # (linspace, digitize, clip のロジックは変更なし)
     x_bins = np.linspace(x_min, x_max, NX + 1)
     y_bins = np.linspace(y_min, y_max, NY + 1)
 
@@ -104,31 +97,24 @@ def calculate_xray_proxy_binned(particle_data):
     ix = np.clip(bin_x - 1, 0, NX - 1)
     iy = np.clip(bin_y - 1, 0, NY - 1)
 
-    # ★ 空間マスク (X_MIN=0.0, X_MAX=320.0 に基づく)
+    # 空間マスク
     spatial_mask = (X_pos >= x_min) & (X_pos <= x_max) & \
                    (Y_pos >= y_min) & (Y_pos <= y_max)
                    
     N_masked = np.sum(spatial_mask)
     
-    # --- デバッグ出力 ---
     print("  --- デバッグ情報 ---")
-    print(f"  X-Range (設定): [{x_min}, {x_max}], Y-Range (設定): [{y_min}, {y_max}]")
-    if N_total > 0:
-        print(f"  ★ X-pos min/max (粒子): {np.min(X_pos):.3f} / {np.max(X_pos):.3f}")
-        print(f"  ★ Y-pos min/max (粒子): {np.min(Y_pos):.3f} / {np.max(Y_pos):.3f}")
-    print(f"  全粒子数: {N_total}, マスクされた粒子数 (集計対象): {N_masked}")
+    print(f"  全粒子数: {N_total}, マスクされた粒子数: {N_masked}")
     
     if N_masked == 0:
-        if N_total > 0:
-            print("  -> **警告: マスクされた粒子がゼロです。グリッド範囲と粒子座標が一致していません。**")
         binned_maps = {}
         for _, _, bin_label in ENERGY_BINS_KEV:
             binned_maps[bin_label] = np.zeros((NY, NX))
         return binned_maps
 
-    # --- 3. エネルギービンごとにマップを作成 ---
+    # --- 3. エネルギービンごとにマップを作成 (Intensity計算) ---
     binned_maps = {}
-    print("  -> (3/4) エネルギービンごとにマスクを作成し、カウント中...")
+    print("  -> (3/4) エネルギービンごとにIntensity(エネルギー総和)を集計中...")
     
     ix_spatial = ix[spatial_mask]
     iy_spatial = iy[spatial_mask]
@@ -136,14 +122,19 @@ def calculate_xray_proxy_binned(particle_data):
     
     for e_min_kev, e_max_kev, bin_label in ENERGY_BINS_KEV:
         energy_mask = (E_kin_keV_spatial >= e_min_kev) & (E_kin_keV_spatial < e_max_kev)
+        
         ix_final = ix_spatial[energy_mask]
         iy_final = iy_spatial[energy_mask]
+        
+        # ★★★ 変更点: 重み付けを 1 (個数) ではなく エネルギー値 に設定 ★★★
+        weights_final = E_kin_keV_spatial[energy_mask]
 
         proxy_map = np.zeros((NY, NX))
-        np.add.at(proxy_map, (iy_final, ix_final), 1)
+        # 座標 (iy, ix) に エネルギー (weights) を加算
+        np.add.at(proxy_map, (iy_final, ix_final), weights_final)
         
         binned_maps[bin_label] = proxy_map
-        print(f"    -> ビン {bin_label} (E=[{e_min_kev}, {e_max_kev}) keV) : {len(ix_final)} 粒子")
+        print(f"    -> ビン {bin_label} : {len(ix_final)} 粒子寄与")
 
     print("  -> (4/4) 2Dマップ計算完了。")
     return binned_maps
@@ -153,7 +144,6 @@ def calculate_xray_proxy_binned(particle_data):
 # ★ ステップ4: データ読み込み関数
 # =======================================================
 def load_text_data(filepath):
-    # (変更なし)
     if not os.path.exists(filepath):
         print(f"    エラー: ファイルが見つかりません: {filepath}")
         return None
@@ -161,11 +151,9 @@ def load_text_data(filepath):
         data = np.loadtxt(filepath)
         if data.ndim == 1:
             if data.size == 0:
-                 print("    -> ファイルは空です。")
                  return np.array([])
             data = data.reshape(1, -1)
         if data.size == 0:
-            print("    -> ファイルは空です。")
             return np.array([])
         return data
     except Exception as e:
@@ -201,7 +189,7 @@ def main():
     OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_data_binned_txt') 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     print(f"--- 生の粒子データ入力元: {data_dir} ---")
-    print(f"--- 2DマップTXTデータ出力先 (ベース): {OUTPUT_DIR} ---")
+    print(f"--- 2DマップTXTデータ出力先: {OUTPUT_DIR} ---")
     
     species_list = [('e', 'electron')] 
 
@@ -214,7 +202,6 @@ def main():
 
         for suffix, species_label in species_list:
             
-            # (ご提示いただいた 'psd_extractor_revised.py' と同じファイル名を使用)
             filename = f'{timestep}_0160-0320_psd_{suffix}.dat'
             filepath = os.path.join(data_dir, filename)
             
@@ -226,12 +213,12 @@ def main():
                 print(f"警告: {species_label} の粒子データが見つからないか、空です。スキップします。")
                 continue
             
-            print(f"  -> {len(particle_data)} 個の粒子を読み込みました。X線プロキシ (ビン別) を計算中...")
+            print(f"  -> {len(particle_data)} 個の粒子を読み込みました。Intensity計算中...")
 
-            # --- 1. 粒子データからX線プロキシ (ビン別) を計算 ---
+            # --- 1. Intensityマップ計算 ---
             binned_proxy_maps = calculate_xray_proxy_binned(particle_data)
             
-            # --- 2. 各ビンをそれぞれのサブディレクトリにテキストファイルとして保存 ---
+            # --- 2. 保存 ---
             print(f"  -> TXTファイルに保存中...")
         
             for bin_label, proxy_map in binned_proxy_maps.items():
@@ -247,22 +234,26 @@ def main():
                 
                 output_filename = os.path.join(output_bin_dir, f'xray_proxy_{timestep}_{bin_label}.txt')
                 
+                # ヘッダーの単位表記も修正
                 header_txt = (
-                    f'Soft X-ray Proxy Map (Particle count)\n'
+                    f'Soft X-ray Intensity Proxy Map (Sum of Energy in keV)\n'
                     f'Energy Bin: [{e_min_str}, {e_max_str}) keV (Label: {bin_label})\n'
-                    f'Shape: ({GLOBAL_NY_PHYS}, {GLOBAL_NX_PHYS})' # (★タイポ修正済)
+                    f'Shape: ({GLOBAL_NY_PHYS}, {GLOBAL_NX_PHYS})'
                 )
                 
+                # Intensityは浮動小数点数になる可能性があるため fmt='%.4e' 等が安全ですが
+                # 整数で見たい場合は '%d' のまま、あるいは '%.6g' などに変更してください。
+                # ここでは汎用的に %.6g (有効数字6桁) とします。
                 np.savetxt(output_filename, proxy_map, 
                            header=header_txt,
-                           fmt='%d') 
+                           fmt='%.6g') 
                            
-                print(f"    -> {bin_label} マップを {output_filename} に保存しました。 (Max: {np.max(proxy_map)})")
+                print(f"    -> {bin_label} マップ保存完了 (Max Intensity: {np.max(proxy_map):.2f})")
             
-            print(f"--- タイムステップ {timestep} の {species_label} データ抽出・保存が完了しました ---")
+            print(f"--- タイムステップ {timestep} 完了 ---")
 
     print("\n=======================================================")
-    print("=== 全ての指定されたタイムステップの処理が完了しました ===")
+    print("=== 全ての処理が完了しました ===")
     print("=======================================================")
 
 if __name__ == "__main__":
