@@ -16,6 +16,6 @@ raw_particle_data/
 helloworld.sh.*
 final_plots/
 bremsstrahlung_plots/
-heating_plots/
-energy_plots/
-energy_plots_eV/
+bremsstrahlung_maxwell_plots/
+mean_energy_plots/
+try_and_errors/
