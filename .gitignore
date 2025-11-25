@@ -18,3 +18,5 @@ final_plots/
 bremsstrahlung_plots/
 bremsstrahlung_maxwell_plots/
 mean_energy_plots/
+photon_plots/
+electron_energy_plots/
