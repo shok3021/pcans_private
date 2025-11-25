@@ -173,7 +173,7 @@ def main():
     except: SCRIPT_DIR = os.path.abspath('.')
     
     DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_ion_weighted')
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_maxwell_intensity')
     
     print(f"--- Strict Bremsstrahlung (Using Actual Ion Data) ---")
     
