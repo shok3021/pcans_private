@@ -169,7 +169,7 @@ def main():
     
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_photon_intensity')
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'photon_intensity')
     
     print("--- Generating Observation-Equivalent X-ray Maps ---")
     

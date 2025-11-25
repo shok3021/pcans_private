@@ -1,20 +1,20 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors # LogNorm用にインポート
 import os
 import sys
 from scipy.integrate import cumtrapz
-# カラーバー配置調整用のモジュール
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # =======================================================
-# ★ ユーザー設定: ディレクトリとパス (環境に合わせて変更してください)
+# ★ ユーザー設定
 # =======================================================
-BREMS_DATA_DIR = os.path.join(os.path.abspath('.'), 'electron_energy_density')
+# ディレクトリ設定 (計算コードの出力先に合わせる)
+INPUT_DATA_DIR = os.path.join(os.path.abspath('.'), 'electron_energy_density')
 FIELD_DATA_DIR = os.path.join(os.path.abspath('.'), 'extracted_data')
 PARAM_FILE_PATH = '/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat'
-OUTPUT_DIR = os.path.join(os.path.abspath('.'), 'electron_energy_plots') # 出力先フォルダ名を変更
+OUTPUT_DIR = os.path.join(os.path.abspath('.'), 'electron_energy_plots')
 
-# エネルギービンの定義
+# エネルギービン (計算コードと同じ定義)
 ENERGY_BINS = [
     '001keV_100keV',
     '100keV_200keV',
@@ -33,12 +33,13 @@ GLOBAL_NX_PHYS = 320
 GLOBAL_NY_PHYS = 639
 DELX = 1.0
 
-# ★ カラーバーの固定レンジ設定
-FIXED_VMIN = 0.0
-FIXED_VMAX = 1.0e7  # 10^7
+# ★ プロットのレンジ設定 (対数スケール用)
+# エネルギー密度(keV)なので、値は大きくなります。データに合わせて調整してください。
+VMIN_LOG = 1e0    # 最小値 (これより小さい値は無視)
+VMAX_LOG = 1e4    # 最大値
 
 # =======================================================
-# ヘルパー関数: パラメータ読み込み & データ読み込み (変更なし)
+# ヘルパー関数
 # =======================================================
 def load_simulation_parameters(param_filepath):
     C_LIGHT, FPI, DT, FGI, VA0, MI, QI = None, None, None, None, None, None, None
@@ -58,33 +59,37 @@ def load_simulation_parameters(param_filepath):
                 elif s.startswith('Va, Vi, Ve'):
                     VA0 = float(parts[7])
     except Exception as e:
-        print(f"Error loading params: {e}. Using defaults.")
-        return 1.0, 1.0, 0.1, 0.1, 1.0, 1.0, 1.0 # Fallback setting
+        print(f"Warning: Could not load params ({e}). Using defaults.")
+        return 1.0, 1.0, 0.1, 0.1, 1.0, 1.0, 1.0
         
     if None in [C_LIGHT, FPI, DT, FGI, VA0, MI, QI]:
-        print("Error: Failed to parse parameters. Using defaults.")
-        return 1.0, 1.0, 0.1, 0.1, 1.0, 1.0, 1.0 # Fallback setting
+        return 1.0, 1.0, 0.1, 0.1, 1.0, 1.0, 1.0
     return C_LIGHT, FPI, DT, FGI, VA0, MI, QI
 
 C_LIGHT, FPI, DT, FGI, VA0, MI, QI = load_simulation_parameters(PARAM_FILE_PATH)
 DI = C_LIGHT / FPI if FPI != 0 else 1.0
 B0 = (FGI * MI * C_LIGHT) / QI if QI != 0 else 1.0
-print(f"--- Normalization: d_i = {DI:.4f}, B0 = {B0:.4f}, dt = {DT:.4f}")
 
-
-def load_brems_txt(timestep, p_type, bin_label):
-    target_dir = os.path.join(BREMS_DATA_DIR, p_type, bin_label)
-    filename = f'intensity_{p_type}_{bin_label}_{timestep}.txt'
+def load_energy_density_txt(timestep, p_type, bin_label):
+    """
+    計算コードの出力ファイル名 'energy_density_...' を読み込む
+    """
+    target_dir = os.path.join(INPUT_DATA_DIR, p_type, bin_label)
+    # ★修正箇所: ファイル名のプレフィックスを energy_density に変更
+    filename = f'energy_density_{p_type}_{bin_label}_{timestep}.txt'
     filepath = os.path.join(target_dir, filename)
+    
     try:
         data = np.loadtxt(filepath)
+        # サイズ補正
         if data.shape != (GLOBAL_NY_PHYS, GLOBAL_NX_PHYS):
             if data.shape[0] >= GLOBAL_NY_PHYS and data.shape[1] >= GLOBAL_NX_PHYS:
                 data = data[:GLOBAL_NY_PHYS, :GLOBAL_NX_PHYS]
             else:
                 return np.zeros((GLOBAL_NY_PHYS, GLOBAL_NX_PHYS))
         return data
-    except:
+    except Exception:
+        # ファイルがない場合などはゼロ行列を返す
         return np.zeros((GLOBAL_NY_PHYS, GLOBAL_NX_PHYS))
 
 def load_field_data_for_lines(timestep):
@@ -107,40 +112,50 @@ def create_coordinates():
     return np.meshgrid(x_norm, y_norm)
 
 # =======================================================
-# プロット関数 (変更: カラーバーを描画せず、cfオブジェクトを返す)
+# プロット関数 (LogNorm対応)
 # =======================================================
-def plot_brems_panel_subplot(ax, X, Y, Intensity, Bx, By, subtitle, omega_t_str, show_ylabel=True):
+def plot_panel_subplot(ax, X, Y, Data, Bx, By, subtitle, omega_t_str, show_ylabel=True):
+    # カラーマップ
     cmap = plt.cm.inferno
-    levels = np.linspace(FIXED_VMIN, FIXED_VMAX, 100)
     
-    # コンタープロット（カラーバーはまだ描かない）
-    cf = ax.contourf(X, Y, Intensity, levels=levels, cmap=cmap)
+    # ★データの前処理: ログプロットのために0以下を極小値に置換
+    # コピーを作成して元のデータを破壊しないようにする
+    plot_data = Data.copy()
+    plot_data[plot_data <= 0] = 1e-10 
     
-    # 磁力線
+    # ★LogNormを使用
+    norm = colors.LogNorm(vmin=VMIN_LOG, vmax=VMAX_LOG)
+    
+    # コンタープロット
+    # LogScaleの場合、levelsは自動生成に任せるか、np.logspaceで生成する
+    cf = ax.pcolormesh(X, Y, plot_data, norm=norm, cmap=cmap, shading='auto')
+    
+    # 磁力線 (エネルギー密度がメインなので、磁力線は薄く描画)
     try:
-        Psi_local = cumtrapz(By, dx=1.0, axis=1, initial=0)
-        ax.contour(X, Y, Psi_local, levels=25, colors='gray', linewidths=0.5, alpha=0.7)
+        if np.any(By):
+            Psi_local = cumtrapz(By, dx=1.0, axis=1, initial=0)
+            ax.contour(X, Y, Psi_local, levels=20, colors='white', linewidths=0.5, alpha=0.5)
     except Exception:
         pass
 
-    # 時刻表示 (右端のプロットだけに表示するなど調整可能だが、今は全てに表示)
+    # 時刻表示
     ax.text(0.96, 0.96, omega_t_str, 
-            transform=ax.transAxes, fontsize=11, fontweight='bold', color='black',
+            transform=ax.transAxes, fontsize=10, fontweight='bold', color='white',
             ha='right', va='top',
-            bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='black', alpha=0.8))
+            bbox=dict(boxstyle='round,pad=0.2', fc='black', ec='none', alpha=0.5))
 
     ax.set_xlabel('$x/d_i$')
-    # 左端のプロットのみY軸ラベルを表示
     if show_ylabel:
         ax.set_ylabel('$y/d_i$')
     
     ax.set_title(subtitle, fontsize=14)
     ax.tick_params(direction='in', top=True, right=True)
+    ax.set_aspect('equal')
     
-    return cf # カラーバー作成のためにcfを返す
+    return cf
 
 # =======================================================
-# メイン処理 (変更: 3パネルを1つの図にまとめる)
+# メイン処理
 # =======================================================
 def process_timestep_combined(timestep_str, output_base_dir):
     ts_int = int(timestep_str)
@@ -149,73 +164,72 @@ def process_timestep_combined(timestep_str, output_base_dir):
     
     print(f"Processing TS: {timestep_str} ({omega_t_str})")
 
-    # 1. 共通データの準備
     Bx, By = load_field_data_for_lines(timestep_str)
     X, Y = create_coordinates()
 
-    # 2. エネルギービンごとのループ
     for bin_label in ENERGY_BINS:
-        # --- データの読み込みと計算 ---
-        data_thermal = load_brems_txt(timestep_str, 'Thermal', bin_label)
-        data_nonthermal = load_brems_txt(timestep_str, 'NonThermal', bin_label)
+        # データの読み込み (修正した関数を使用)
+        data_thermal = load_energy_density_txt(timestep_str, 'Thermal', bin_label)
+        data_nonthermal = load_energy_density_txt(timestep_str, 'NonThermal', bin_label)
         data_total = data_thermal + data_nonthermal
         
-        # プロットするデータとタイトルのリスト
+        # データが全て0の場合はスキップしない（真っ暗な図を作る）が、警告は出さない
+        
         plot_list = [
             ('Thermal', data_thermal),
             ('NonThermal', data_nonthermal),
             ('Total', data_total)
         ]
 
-        # --- 図の作成 (1行3列) ---
-        # sharey=TrueでY軸を共有し、ラベルの重複を防ぐ
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True, sharex=True)
+        # 図の作成 (1行3列)
+        fig, axes = plt.subplots(1, 3, figsize=(16, 8), sharey=True, sharex=True)
+        fig.suptitle(f"Energy Density Map: {bin_label}", fontsize=16, y=0.95)
         
-        # 全体のタイトル
-        fig.suptitle(f"Bremsstrahlung Intensity [{bin_label}] at {omega_t_str}", fontsize=16, y=0.98)
-        
-        cf_for_cbar = None # カラーバー用
+        cf_for_cbar = None
 
-        # 3つのパネルを描画するループ
         for i, (p_type, data) in enumerate(plot_list):
             ax = axes[i]
-            # 左端(i==0)だけYラベルを表示
-            cf = plot_brems_panel_subplot(ax, X, Y, data, Bx, By, p_type, omega_t_str, show_ylabel=(i==0))
-            cf_for_cbar = cf # 最後のcfを保持しておく（Vmin/Vmaxは共通なのでどれでも良い）
+            cf = plot_panel_subplot(ax, X, Y, data, Bx, By, p_type, omega_t_str, show_ylabel=(i==0))
+            cf_for_cbar = cf
 
-        # --- 共通カラーバーの追加 ---
-        # 図の右側にスペースを空けてカラーバーを配置
-        fig.subplots_adjust(right=0.88, wspace=0.1)
-        cbar_ax = fig.add_axes([0.90, 0.15, 0.015, 0.7]) # [left, bottom, width, height]
-        cbar = fig.colorbar(cf_for_cbar, cax=cbar_ax, format='%.0e')
-        cbar.set_label(r'Intensity (Arbitrary Units)', fontsize=12)
-        cbar.set_ticks(np.linspace(FIXED_VMIN, FIXED_VMAX, 6))
+        # 共通カラーバー
+        fig.subplots_adjust(right=0.88, wspace=0.05)
+        cbar_ax = fig.add_axes([0.90, 0.25, 0.015, 0.5]) # [left, bottom, width, height]
+        
+        if cf_for_cbar:
+            cbar = fig.colorbar(cf_for_cbar, cax=cbar_ax)
+            cbar.set_label(r'Energy Density (keV / cell)', fontsize=12)
+            # LogScaleのラベルを見やすくする
+            cbar.minorticks_on()
 
-        # --- 保存 ---
-        # 出力先: output_dir/bin_label/combined_....png
+        # 保存
         save_dir = os.path.join(output_base_dir, bin_label)
         os.makedirs(save_dir, exist_ok=True)
         
-        out_name = f"combined_brems_{bin_label}_{timestep_str}.png"
+        out_name = f"energy_map_{bin_label}_{timestep_str}.png"
         plt.savefig(os.path.join(save_dir, out_name), dpi=150, bbox_inches='tight')
         plt.close(fig)
             
-    print(f"  -> Saved combined plots for {timestep_str}")
+    print(f"  -> Saved plots for {timestep_str}")
 
 if __name__ == "__main__":
-    plt.rcParams['mathtext.fontset'] = 'cm'
-    plt.rcParams['font.family'] = 'serif'
+    # LaTeXフォント設定 (環境になければコメントアウトしてください)
+    try:
+        plt.rcParams['mathtext.fontset'] = 'cm'
+        plt.rcParams['font.family'] = 'serif'
+    except:
+        pass
 
     if len(sys.argv) < 4:
-        print("Usage: python plot_brems_combined.py [start] [end] [step]")
+        print("Usage: python plot_energy_density.py [start] [end] [step]")
         sys.exit(1)
         
     start = int(sys.argv[1])
     end = int(sys.argv[2])
     step = int(sys.argv[3])
     
-    print(f"--- Visualizing Combined Bremsstrahlung Maps ---")
-    print(f"Data Source: {BREMS_DATA_DIR}")
+    print(f"--- Plotting Energy Density Maps (Log Scale) ---")
+    print(f"Input: {INPUT_DATA_DIR}")
     print(f"Output: {OUTPUT_DIR}")
 
     for t in range(start, end + step, step):
