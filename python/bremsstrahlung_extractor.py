@@ -4,11 +4,12 @@ import sys
 from scipy.constants import m_e, c, elementary_charge 
 
 # =======================================================
-# ★ 設定: エネルギービンと閾値
+# ★ 設定
 # =======================================================
 KEV_TO_J = 1000.0 * elementary_charge
+ELECTRON_MASS_KEV = 510.998 
 
-# 1. エネルギービンの定義 (keV)
+# エネルギービン
 ENERGY_BINS = [
     (1.0, 100.0,    '001keV_100keV'),
     (100.0, 200.0,  '100keV_200keV'),
@@ -22,270 +23,204 @@ ENERGY_BINS = [
     (50000.0, 100000.0, '50000keV_over')
 ]
 
-# 2. マクスウェル分布フィッティング設定
-# -------------------------------------------------------
-# ★ FIT_CUTOFF_RATIO:
-# 温度を決めるためのフィッティング時に、暫定温度の何倍以上を「外れ値」として捨てるか。
-# マクスウェル分布のコアを厳密に捉えるには 3.0 ~ 4.0 程度が適切です。
+# フィッティングパラメータ
 FIT_CUTOFF_RATIO = 3.0 
-
-# ★ MAX_ITER:
-# 温度収束計算の反復回数。通常5〜10回で十分収束します。
 MAX_ITER = 10
-
-# ★ ALPHA_THRESHOLD:
-# 最終的な分類（Thermal vs Non-Thermal）のしきい値。
-# 収束した「真の背景温度」に対して、何倍以上を非熱的とするか。
-# 通常、熱的分布は数倍の温度で指数関数的に減少するため、10倍あれば確実に非熱的です。
 ALPHA_THRESHOLD = 10.0 
-# -------------------------------------------------------
 
 # グリッド設定
 GLOBAL_NX_GRID = 321
 GLOBAL_NY_GRID = 640
 NX = GLOBAL_NX_GRID - 1
 NY = GLOBAL_NY_GRID - 1
-DELX = 1.0
-
-# 座標範囲
-X_MIN, X_MAX = 0.0, NX * DELX
-Y_MIN, Y_MAX = 0.0, NY * DELX
+X_MIN, X_MAX = 0.0, NX * 1.0
+Y_MIN, Y_MAX = 0.0, NY * 1.0
 
 # =======================================================
-# 計算エンジン (反復フィッティング版)
+# 計算エンジン
 # =======================================================
-def calculate_detailed_intensity_maps(particle_data):
+def calculate_detailed_intensity_maps(e_data, i_data):
     """
-    改良版: 反復的マクスウェル・フィッティング (Iterative Maxwellian Fitting)
+    引数:
+      e_data: 電子データ (x, y, vx, vy, vz, ...)
+      i_data: イオンデータ (x, y, ... 他は不要)
+    """
+    # --- 1. イオン密度マップ (ni) の作成 ---
+    # イオンは位置情報だけでOK
+    print("  -> Creating Ion Density Map (ni)...")
+    i_X = i_data[:, 0]
+    i_Y = i_data[:, 1]
     
-    グリッドごとに局所的な速度分布関数を確認し、
-    高エネルギー粒子の影響を排除した「真の熱的温度 (T_core)」が収束するまで計算を繰り返す。
-    """
-    # --- 1. 粒子情報の展開 ---
-    X_pos = particle_data[:, 0]
-    Y_pos = particle_data[:, 1]
-    vx = particle_data[:, 2]
-    vy = particle_data[:, 3]
-    vz = particle_data[:, 4]
+    x_edges = np.linspace(X_MIN, X_MAX, NX + 1)
+    y_edges = np.linspace(Y_MIN, Y_MAX, NY + 1)
+    
+    # イオンの個数密度マップを作成
+    Ion_Density_Map, _, _ = np.histogram2d(i_Y, i_X, bins=[y_edges, x_edges])
 
-    print("  -> Calculating energies...")
-    v_sq = vx**2 + vy**2 + vz**2
+    # --- 2. 電子の処理 ---
+    print("  -> Processing Electrons...")
+    e_X = e_data[:, 0]
+    e_Y = e_data[:, 1]
+    # 速度 -> エネルギー -> 運動量
+    v_sq = e_data[:, 2]**2 + e_data[:, 3]**2 + e_data[:, 4]**2
     v_sq = np.clip(v_sq, 0.0, 1.0 - 1e-12)
     gamma = 1.0 / np.sqrt(1.0 - v_sq)
     E_kin_keV = ((gamma - 1.0) * m_e * c**2) / KEV_TO_J
 
-    x_edges = np.linspace(X_MIN, X_MAX, NX + 1)
-    y_edges = np.linspace(Y_MIN, Y_MAX, NY + 1)
+    # グリッド座標
+    ix = np.clip(np.digitize(e_X, x_edges) - 1, 0, NX - 1)
+    iy = np.clip(np.digitize(e_Y, y_edges) - 1, 0, NY - 1)
 
-    # 粒子ごとのグリッド座標 (ix, iy)
-    ix = np.clip(np.digitize(X_pos, x_edges) - 1, 0, NX - 1)
-    iy = np.clip(np.digitize(Y_pos, y_edges) - 1, 0, NY - 1)
-
-    # ===========================================================
-    # ★ 反復的温度収束プロセス (Iterative Core Temperature Fitting)
-    # ===========================================================
+    # --- 3. 反復的温度フィッティング (電子データのみで決定) ---
     print(f"  -> Iterative fitting of Maxwellian core (Max Iter: {MAX_ITER})...")
-
-    # 初期状態: 全粒子を「熱的フィッティング候補」とする
-    mask_fitting_candidate = np.ones(len(E_kin_keV), dtype=bool)
-    
-    # 温度マップの初期化 (適当な値を入れておく、初回ループで上書きされる)
+    mask_fitting = np.ones(len(E_kin_keV), dtype=bool)
     T_core_map = np.zeros((NY, NX))
 
     for i in range(MAX_ITER):
-        # 現在の候補粒子だけで統計をとる
-        # 重み付きヒストグラムを使うことで、forループを使わずにグリッド計算
+        curr_X = e_X[mask_fitting]
+        curr_Y = e_Y[mask_fitting]
+        curr_E = E_kin_keV[mask_fitting]
         
-        # 候補粒子の抽出
-        curr_X = X_pos[mask_fitting_candidate]
-        curr_Y = Y_pos[mask_fitting_candidate]
-        curr_E = E_kin_keV[mask_fitting_candidate]
-        
-        if len(curr_E) == 0:
-            print(f"     Iter {i+1}: No particles left for fitting (unlikely). Break.")
-            break
+        if len(curr_E) == 0: break
 
-        # 密度(カウント)とエネルギー密度(ΣE)を計算
         H_count, _, _ = np.histogram2d(curr_Y, curr_X, bins=[y_edges, x_edges])
         H_sum_E, _, _ = np.histogram2d(curr_Y, curr_X, bins=[y_edges, x_edges], weights=curr_E)
         
-        # 温度計算: T = (2/3) * <E>
         with np.errstate(divide='ignore', invalid='ignore'):
             Mean_E = H_sum_E / H_count
             Mean_E[H_count == 0] = 0.0
         
-        T_current_iter = (2.0 / 3.0) * Mean_E
-        
-        # NaNケア (粒子がない場所は0にする)
-        T_current_iter = np.nan_to_num(T_current_iter, nan=0.0)
-        
-        # 保存
-        T_core_map = T_current_iter.copy()
-        
-        # --- 次の反復のための選別 ---
-        # 各粒子の場所の温度を取得
-        # 注: ここでは全粒子に対して温度を割り当てる（候補外になった粒子も復活の可能性を持たせるため、全数チェックが望ましいが、
-        #     収束を早めるため、通常は「現在より厳しい基準」で絞っていく）
+        T_iter = (2.0 / 3.0) * Mean_E
+        T_iter = np.nan_to_num(T_iter, nan=0.0)
+        T_core_map = T_iter.copy()
         
         T_particle = T_core_map[iy, ix]
-        
-        # 新しいマスクを作成: エネルギーが "FIT_CUTOFF_RATIO * T" 以下のものだけを次の「熱的コア」とする
-        # 例: 3倍の温度より熱いものは「フィッティング用の計算」からは除外する（※最終分類ではない）
-        # 温度が0(粒子なし)の場所は、全ての粒子を含める(マスクTrue)か除外するかだが、便宜上除外しないように閾値を工夫
-        
-        # T_particleが0の場所での除算エラーを防ぐ
         safe_T = T_particle.copy()
-        safe_T[safe_T < 1e-9] = 1.0 # ダミー値 (どうせエネルギー判定で落ちないようにするか、別途処理)
-        
+        safe_T[safe_T < 1e-9] = 1.0
         ratio = E_kin_keV / safe_T
-        
-        # T=0の場所は粒子が一つのみ、あるいはコールドなので、すべてFittingに使う
-        ratio[T_particle < 1e-9] = 0.0 
-        
-        # 更新: コア分布に近いものだけを残す
-        mask_fitting_candidate = (ratio <= FIT_CUTOFF_RATIO)
-        
-        # ログ出力（進捗確認用）
-        n_candidates = np.sum(mask_fitting_candidate)
-        print(f"     Iter {i+1}/{MAX_ITER}: Particles in thermal core fit = {n_candidates} / {len(E_kin_keV)}")
-        
-        # 変化が少なければ早期終了してもよいが、念のため指定回数回す
+        ratio[T_particle < 1e-9] = 0.0
+        mask_fitting = (ratio <= FIT_CUTOFF_RATIO)
 
-    # ===========================================================
-    # ★ 最終分類 (Final Classification)
-    # ===========================================================
-    print("  -> Final classification using converged core temperature...")
-    
-    # 最終的に収束した温度 T_core_map を使う
+    # --- 4. 最終分類 ---
     T_final = T_core_map[iy, ix]
-    
-    # しきい値判定
-    # ここではユーザー指定の ALPHA_THRESHOLD (例: 10倍) を使う
-    # ※ T_final は「高エネルギー粒子を完全に排除して計算された純粋な背景温度」なので、
-    #    これの10倍を超える粒子は、マクスウェル分布の確率的にほぼあり得ない＝確実に非熱的であると言える。
-    
-    threshold_energy = ALPHA_THRESHOLD * T_final
-    
-    # 温度が極端に低い(計算不能)場所のケア
+    threshold = ALPHA_THRESHOLD * T_final
     valid_T = (T_final > 1e-9)
     
     is_nonthermal = np.zeros(len(E_kin_keV), dtype=bool)
-    is_nonthermal[valid_T] = (E_kin_keV[valid_T] > threshold_energy[valid_T])
-    
-    # マクスウェル分布に従っているもの（Thermal）
+    is_nonthermal[valid_T] = (E_kin_keV[valid_T] > threshold[valid_T])
     is_thermal = ~is_nonthermal
 
-    # ===========================================================
-    # ★ マップ集計
-    # ===========================================================
-    print("  -> Aggregating intensity maps...")
+    # --- 5. 強度マップ作成 ( I ~ p * ni ) ---
+    print("  -> Aggregating intensity maps (Weight = p_ele * n_ion)...")
     
-    Emission_weight = np.sqrt(E_kin_keV)
+    # 運動量 p = sqrt(E^2 + 2mE)
+    Momentum_p = np.sqrt(E_kin_keV**2 + 2 * E_kin_keV * ELECTRON_MASS_KEV)
     
-    maps = {
-        'Thermal': {},
-        'NonThermal': {}
-    }
-
-    # マップ初期化
+    maps = {'Thermal': {}, 'NonThermal': {}}
     for _, _, label in ENERGY_BINS:
         maps['Thermal'][label] = np.zeros((NY, NX))
         maps['NonThermal'][label] = np.zeros((NY, NX))
 
-    # ビンごとの集計
     for e_min, e_max, label in ENERGY_BINS:
-        # エネルギー帯域フィルタ
         in_bin = (E_kin_keV >= e_min) & (E_kin_keV < e_max)
         
-        # (A) Thermal Map
+        # Thermal
         mask_T = is_thermal & in_bin
         if np.any(mask_T):
-            intens_map = np.zeros((NY, NX))
-            np.add.at(intens_map, (iy[mask_T], ix[mask_T]), Emission_weight[mask_T])
-            maps['Thermal'][label] = intens_map
+            flux_map = np.zeros((NY, NX))
+            # 電子の寄与 (pの総和)
+            np.add.at(flux_map, (iy[mask_T], ix[mask_T]), Momentum_p[mask_T])
+            # 実際のイオン密度を掛ける
+            maps['Thermal'][label] = flux_map * Ion_Density_Map
             
-        # (B) NonThermal Map
+        # NonThermal
         mask_NT = is_nonthermal & in_bin
         if np.any(mask_NT):
-            intens_map = np.zeros((NY, NX))
-            np.add.at(intens_map, (iy[mask_NT], ix[mask_NT]), Emission_weight[mask_NT])
-            maps['NonThermal'][label] = intens_map
+            flux_map = np.zeros((NY, NX))
+            np.add.at(flux_map, (iy[mask_NT], ix[mask_NT]), Momentum_p[mask_NT])
+            maps['NonThermal'][label] = flux_map * Ion_Density_Map
             
     return maps
 
-# =======================================================
-# 保存関数 (TXTのみ)
-# =======================================================
 def save_category_txt(maps_dict, timestep, output_base):
-    """
-    辞書に入ったマップをTXTファイルとして保存する
-    """
     for particle_type in ['Thermal', 'NonThermal']:
         type_dir = os.path.join(output_base, particle_type)
         os.makedirs(type_dir, exist_ok=True)
-        
         for e_min, e_max, bin_label in ENERGY_BINS:
             intensity_map = maps_dict[particle_type][bin_label]
-            
             bin_dir = os.path.join(type_dir, bin_label)
             os.makedirs(bin_dir, exist_ok=True)
-            
             txt_name = f'intensity_{particle_type}_{bin_label}_{timestep}.txt'
             txt_path = os.path.join(bin_dir, txt_name)
-            
-            header = (f'Bremsstrahlung Intensity Map\n'
+            header = (f'Bremsstrahlung Intensity Map (Strict Mode: p_e * n_i)\n'
                       f'Type: {particle_type}\n'
                       f'Energy Bin: {bin_label} ({e_min}-{e_max} keV)\n'
-                      f'Timestep: {timestep}\n'
-                      f'Shape: ({NY}, {NX})')
-            
+                      f'Timestep: {timestep}')
             np.savetxt(txt_path, intensity_map, header=header, fmt='%.6g')
-            print(f"    Saved TXT: {particle_type} - {bin_label}")
 
 # =======================================================
 # メイン
 # =======================================================
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python detailed_brems_iterative.py [start] [end] [step]")
+        print("Usage: python detailed_brems_strict_ion.py [start] [end] [step]")
         sys.exit(1)
         
     start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
     
-    # ディレクトリ設定 (環境に合わせて調整してください)
+    # ★ パス設定
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')
     
     DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_maxwell_intensity')
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'bremsstrahlung_ion_weighted')
     
-    print(f"--- Detailed Bremsstrahlung Extraction (Iterative Maxwellian Fit) ---")
-    print(f"Output: {OUTPUT_DIR}")
+    print(f"--- Strict Bremsstrahlung (Using Actual Ion Data) ---")
     
     for t_int in range(start, end + step, step):
         ts = f"{t_int:06d}"
         print(f"\n=== Processing TS: {ts} ===")
         
-        fpath = os.path.join(DATA_DIR, f'{ts}_0160-0320_psd_e.dat')
-        if not os.path.exists(fpath):
-            print("  File not found.")
+        # 電子データ
+        fpath_e = os.path.join(DATA_DIR, f'{ts}_0160-0320_psd_e.dat')
+        # イオンデータ (ファイル名規則を仮定)
+        fpath_i = os.path.join(DATA_DIR, f'{ts}_0160-0320_psd_i.dat')
+        
+        if not os.path.exists(fpath_e):
+            print(f"  Electron file not found: {fpath_e}")
+            continue
+        if not os.path.exists(fpath_i):
+            print(f"  Ion file not found: {fpath_i}")
             continue
             
         try:
-            data = np.loadtxt(fpath)
-            if data.size == 0: continue
-            if data.ndim == 1: data = data.reshape(1, -1)
-        except Exception as e:
-            print(f"  Error reading file: {e}")
-            continue
-        
-        # 計算
-        result_maps = calculate_detailed_intensity_maps(data)
-        
-        # 保存
-        save_category_txt(result_maps, ts, OUTPUT_DIR)
+            # 読み込み
+            print("  Reading Electrons...")
+            data_e = np.loadtxt(fpath_e)
+            if data_e.ndim == 1: data_e = data_e.reshape(1, -1)
+            
+            print("  Reading Ions...")
+            # イオンは位置(0,1列目)だけで良いのでusecols等を使うと速いが、
+            # np.loadtxtは行単位処理なので全読みしてメモリで切る
+            data_i = np.loadtxt(fpath_i)
+            if data_i.ndim == 1: data_i = data_i.reshape(1, -1)
+            
+            if data_e.size == 0 or data_i.size == 0:
+                print("  Data empty.")
+                continue
 
-    print("\nDone.")
+            # 計算実行
+            result_maps = calculate_detailed_intensity_maps(data_e, data_i)
+            
+            # 保存
+            save_category_txt(result_maps, ts, OUTPUT_DIR)
+            print(f"  Saved TS: {ts}")
+            
+        except Exception as e:
+            print(f"  Error: {e}")
+            continue
+
+    print("\nAll Done.")
 
 if __name__ == "__main__":
     main()
