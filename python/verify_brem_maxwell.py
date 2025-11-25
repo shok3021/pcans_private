@@ -22,7 +22,7 @@ ALPHA_THRESHOLD = 10.0
 
 # 局所チェックのためにまとめる範囲 (半径)
 # 1グリッドだと粒子数が少なすぎてガタガタになるため、周辺数グリッドをまとめる
-LOCAL_BOX_RADIUS = 2  # 中心から前後2グリッド (つまり 5x5 グリッドの範囲)
+LOCAL_BOX_RADIUS = 12  # 中心から前後2グリッド (つまり 5x5 グリッドの範囲)
 
 # =======================================================
 # 計算ロジック (共通)
@@ -132,6 +132,7 @@ def analyze_local_spots(fpath, ts, output_dir):
 
     # 全体計算
     mask_T, mask_NT, T_map, ix_arr, iy_arr = perform_separation_and_get_map(X, Y, E)
+    print(f"DEBUG: T_map max={np.max(T_map):.2f}, min={np.min(T_map[T_map>0]):.2f}, mean={np.mean(T_map):.2f}")
 
     # ----------------------------------------------------
     # 場所探し: 一番熱い場所(Hot) と 冷たい場所(Cold)
