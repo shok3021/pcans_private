@@ -17,7 +17,7 @@ SIMULATION_BETA_BG = 0.125 # 背景プラズマベータ
 BASE_DIR = os.path.abspath('/home/shok/pcans') 
 FIELD_DATA_DIR = os.path.join(BASE_DIR, 'python/extracted_data')
 MOMENT_DATA_DIR = os.path.join(BASE_DIR, 'python/extracted_psd_data_moments')
-OUTPUT_DIR = os.path.join(BASE_DIR, 'python/heating_results_accurate')
+OUTPUT_DIR = os.path.join(BASE_DIR, 'python/gca_bulk_data')
 PARAM_FILE_PATH = os.path.join(BASE_DIR, 'em2d_mpi/md_mrx/dat/init_param.dat')
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)

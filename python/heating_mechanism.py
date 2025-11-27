@@ -154,25 +154,44 @@ def calculate_gca_heating(timestep):
 
     Te_tensor_raw = load_tensor_raw(timestep)
     
-    # ★★★ 自動スケーリング計算 (B=1, beta=0.8基準) ★★★
-    TARGET_BETA = 0.8
-    # B=1.0 (Normalized) のときのターゲット圧力
-    target_P_avg = TARGET_BETA * 0.5 
+    # =======================================================
+    # ★★★ 物理的正規化 (Physical Normalization) ★★★
+    # =======================================================
+    # Fortranの const.f90 より算出: 
+    # beta(0.5) * rtemp(0.25) = 0.125
+    SIMULATION_BETA_BG = 0.125  
     
-    trace_T_raw = Te_tensor_raw['xx'] + Te_tensor_raw['yy'] + Te_tensor_raw['zz']
-    mean_Trace_T = np.nanmean(trace_T_raw)
-    current_P_proxy = 1.0 * (mean_Trace_T / 3.0) 
+    # 磁場がほぼ1 (背景磁場) の静かな領域を探すためのマスク
+    # (B ~ 1.0 かつ 流速が小さい場所を背景とみなす)
+    B_mag = np.sqrt(Bx**2 + By**2 + Bz**2)
+    # 簡易的に、磁場強度が0.9~1.1の範囲を背景とみなして平均をとります
+    bg_mask = (B_mag > 0.9) & (B_mag < 1.1)
     
-    if current_P_proxy > 1e-12:
-        SCALE_FACTOR = target_P_avg / current_P_proxy
-    else:
-        SCALE_FACTOR = 1.0
+    # もし背景が見つからなければ全体平均を使う (フォールバック)
+    if np.sum(bg_mask) < 10:
+        bg_mask = np.ones_like(B_mag, dtype=bool)
 
-    print(f"  [AUTO-SCALING] Target P (Fixed): {target_P_avg:.4e}, Raw P_proxy: {current_P_proxy:.4e}")
-    print(f"  [AUTO-SCALING] Applied Scale Factor: {SCALE_FACTOR:.4e}")
+    # 生の圧力の代表値 (Trace/3)
+    trace_T_raw = Te_tensor_raw['xx'] + Te_tensor_raw['yy'] + Te_tensor_raw['zz']
+    P_raw_mean = np.nanmean(trace_T_raw[bg_mask]) / 3.0
     
-    Te_tensor = {k: v * SCALE_FACTOR for k, v in Te_tensor_raw.items()}
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★
+    if P_raw_mean == 0 or np.isnan(P_raw_mean):
+        P_raw_mean = 1.0 # ゼロ除算防止
+        
+    # ターゲットとする背景圧力 (P = beta * B^2 / 2)
+    # B_bg = 1.0 と仮定
+    P_target_bg = SIMULATION_BETA_BG * (1.0**2) / 2.0
+    
+    # 正規化係数の算出 (これが 1e-6 程度になるはずです)
+    NORM_FACTOR = P_target_bg / P_raw_mean
+    
+    print(f"  [PHYSICAL NORM] Raw P_bg: {P_raw_mean:.4e}, Target P_bg: {P_target_bg:.4e}")
+    print(f"  [PHYSICAL NORM] Global Factor: {NORM_FACTOR:.4e}")
+    
+    # テンソル全体にこの「定数」を掛ける (場所によって変えない！)
+    Te_tensor = {k: v * NORM_FACTOR for k, v in Te_tensor_raw.items()}
+    
+    # =======================================================
     
     # --- Vector Calculations ---
     B_mag = np.sqrt(Bx**2 + By**2 + Bz**2)
@@ -274,7 +293,7 @@ def plot_heating_final(timestep):
     ]
     
     # ★★★ 固定レンジ設定 (-1.0 to 1.0) ★★★
-    FIXED_LIMIT = 1.0   
+    FIXED_LIMIT = 1.0  
     LIN_THRESH = 0.01
 
     # 【重要】levels を -1.0 ～ 1.0 の範囲で100等分した配列にする
@@ -289,9 +308,7 @@ def plot_heating_final(timestep):
                                  vmin=-FIXED_LIMIT, vmax=FIXED_LIMIT, base=10)
         
         # 【修正箇所】 data はそのまま（clipしない）。levels に fixed_levels を渡す。
-        # extend='both' にすることで、範囲外の値（>1.0 や <-1.0）には
-        # カラーバーの両端の色（濃い赤/濃い青）が適用されます。
-        cf = ax.contourf(X, Y, data, levels=fixed_levels, cmap='seismic', norm=norm)
+        cf = ax.contourf(X, Y, data, levels=fixed_levels, cmap='gist_ncar', norm=norm)
                 
         stride_x = max(1, nx // 30)
         stride_y = max(1, ny // 30)
