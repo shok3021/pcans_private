@@ -82,7 +82,7 @@ DX_PHYS_COARSE = DX_PHYS * BINNING_FACTOR
 def calculate_and_save_heating(timestep):
     print(f"--- Processing Timestep: {timestep} ---")
 
-    # 1. データ読み込み
+    # 1. データ読み込み (Raw Data + Pre-Smooth)
     _Bx = load_smooth_data(timestep, FIELD_DATA_DIR, 'data', 'Bx')
     _By = load_smooth_data(timestep, FIELD_DATA_DIR, 'data', 'By')
     _Bz = load_smooth_data(timestep, FIELD_DATA_DIR, 'data', 'Bz')
@@ -90,17 +90,18 @@ def calculate_and_save_heating(timestep):
     _Ey = load_smooth_data(timestep, FIELD_DATA_DIR, 'data', 'Ey')
     _Ez = load_smooth_data(timestep, FIELD_DATA_DIR, 'data', 'Ez')
     
-    _ne = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_density_count')
-    _ni = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_density_count')
+    # ★★★ 修正箇所: ここで高解像度のまま B_mag と gradB を計算する ★★★
+    # 磁場強度 (Fine Grid)
+    _B_mag = np.sqrt(_Bx**2 + _By**2 + _Bz**2)
     
-    _Vxe = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_Vx') / VA0
-    _Vye = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_Vy') / VA0
-    _Vze = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_Vz') / VA0
-    _Vxi = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_Vx') / VA0
-    _Vyi = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_Vy') / VA0
-    _Vzi = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_Vz') / VA0
-
+    # 勾配計算 (Fine Grid)
+    # ※微分には細かいグリッド幅 (DX_PHYS) を使う必要があります
+    DX_PHYS = DELX / DI
+    _gradB_x, _gradB_y = gradient_2d(_B_mag, DX_PHYS)
+    
+    # =======================================================
     # 2. ビニング (平均化)
+    # =======================================================
     Bx = rebin(_Bx, BINNING_FACTOR)
     By = rebin(_By, BINNING_FACTOR)
     Bz = rebin(_Bz, BINNING_FACTOR)
@@ -108,9 +109,22 @@ def calculate_and_save_heating(timestep):
     Ey = rebin(_Ey, BINNING_FACTOR)
     Ez = rebin(_Ez, BINNING_FACTOR)
     
-    ne = rebin(_ne, BINNING_FACTOR) # ★密度保存用
-    ni = rebin(_ni, BINNING_FACTOR)
+    # ★★★ gradB もここでビニングする ★★★
+    gradB_x = rebin(_gradB_x, BINNING_FACTOR)
+    gradB_y = rebin(_gradB_y, BINNING_FACTOR)
     
+    # その他変数の読み込みとビニング
+    _ne = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_density_count')
+    _ni = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_density_count')
+    _Vxe = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_Vx') / VA0
+    _Vye = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_Vy') / VA0
+    _Vze = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'electron_Vz') / VA0
+    _Vxi = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_Vx') / VA0
+    _Vyi = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_Vy') / VA0
+    _Vzi = load_smooth_data(timestep, MOMENT_DATA_DIR, 'data', 'ion_Vz') / VA0
+
+    ne = rebin(_ne, BINNING_FACTOR)
+    ni = rebin(_ni, BINNING_FACTOR)
     Vxe = rebin(_Vxe, BINNING_FACTOR)
     Vye = rebin(_Vye, BINNING_FACTOR)
     Vze = rebin(_Vze, BINNING_FACTOR)
@@ -122,7 +136,7 @@ def calculate_and_save_heating(timestep):
     avg_N = np.mean(N_tot[N_tot > 0.1]) if np.any(N_tot > 0.1) else 1.0
     n_proxy = N_tot / avg_N
 
-    # 3. 圧力テンソル処理
+    # 3. 圧力テンソル処理 (変更なし)
     def load_tensor_raw(ts):
         comps = ['xx', 'yy', 'zz', 'xy', 'yz', 'xz']
         tensor = {}
@@ -134,10 +148,10 @@ def calculate_and_save_heating(timestep):
     try:
         Te_tensor_raw = load_tensor_raw(timestep)
     except:
-        print("  Error: Tensor data missing.")
         return
 
-    B_mag = np.sqrt(Bx**2 + By**2 + Bz**2)
+    # 正規化処理 (変更なし)
+    B_mag = np.sqrt(Bx**2 + By**2 + Bz**2) # これはCoarse Gridでの大きさ(規格化用)
     bg_mask = (B_mag > 0.9) & (B_mag < 1.1)
     if np.sum(bg_mask) < 10: bg_mask = np.ones_like(B_mag, dtype=bool)
 
@@ -167,6 +181,8 @@ def calculate_and_save_heating(timestep):
     uE_y = (Ez*Bx - Ex*Bz) / (B_safe**2)
     uE_z = (Ex*By - Ey*Bx) / (B_safe**2)
     
+    # 曲率計算 (これも本来はFineでやってからBinningが良いが、今回はGradBが主眼なので維持)
+    # 必要ならここも同様に修正してください
     dbx_dx, dbx_dy = gradient_2d(bx, DX_PHYS_COARSE)
     dby_dx, dby_dy = gradient_2d(by, DX_PHYS_COARSE)
     dbz_dx, dbz_dy = gradient_2d(bz, DX_PHYS_COARSE)
@@ -174,7 +190,12 @@ def calculate_and_save_heating(timestep):
     kappa_x = bx * dbx_dx + by * dbx_dy
     kappa_y = bx * dby_dx + by * dby_dy
     kappa_z = bx * dbz_dx + by * dbz_dy
-    gradB_x, gradB_y = gradient_2d(B_mag, DX_PHYS_COARSE)
+    
+    # ★以前の gradB 計算箇所は削除★
+    # gradB_x, gradB_y = gradient_2d(B_mag, DX_PHYS_COARSE) <-- 削除
+    
+    # デバッグ用プリント: 値がゼロでないか確認
+    print(f"  [DEBUG] Max |gradB|: {np.max(np.abs(gradB_x)):.4e}")
     
     # スムージング
     uE_x = gaussian_filter(uE_x, sigma=VECTOR_SMOOTH_SIGMA)
@@ -196,8 +217,12 @@ def calculate_and_save_heating(timestep):
     term_E_par = E_par * J_par
     curvature_drive = uE_x*kappa_x + uE_y*kappa_y + uE_z*kappa_z
     term_Curvature = (p_par + n_proxy * ue_par**2) * curvature_drive
+    
     gradB_drive = uE_x * gradB_x + uE_y * gradB_y
     term_GradB = (p_perp / B_safe) * gradB_drive
+    
+    print(f"  [DEBUG] Max |term_GradB|: {np.max(np.abs(term_GradB)):.4e}")
+
     term_Total = term_E_par + term_Curvature + term_GradB
 
     # 最終スムージング
