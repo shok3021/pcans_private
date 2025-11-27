@@ -20,3 +20,6 @@ bremsstrahlung_maxwell_plots/
 mean_energy_plots/
 photon_plots/
 electron_energy_plots/
+heating_plots_final/
+heating_plots_kappaetc/
+heating_plots_pressureetc/
