@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter
 BASE_DIR = os.path.abspath('/home/shok/pcans') # 実行場所
 FIELD_DIR = os.path.join(BASE_DIR, 'python/extracted_data') # 電磁場データの場所
 PSD_DIR = os.path.join(BASE_DIR, 'em2d_mpi/md_mrx/psd') # 粒子データの場所
-OUTPUT_DIR = os.path.join(BASE_DIR, '/python/particle_gca_results') # 出力先
+OUTPUT_DIR = os.path.join('./particle_gca_results') # 出力先
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # グリッド設定
