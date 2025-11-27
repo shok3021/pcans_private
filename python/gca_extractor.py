@@ -7,9 +7,9 @@ from scipy.ndimage import gaussian_filter
 # 設定 (ユーザー環境に合わせてパスを変更してください)
 # =======================================================
 # パス設定
-BASE_DIR = os.path.abspath('/home/shok/pcans/em2d_mpi/md_mrx') # 実行場所
-FIELD_DIR = os.path.join(BASE_DIR, 'extracted_data') # 電磁場データの場所
-PSD_DIR = os.path.join(BASE_DIR, 'psd') # 粒子データの場所
+BASE_DIR = os.path.abspath('/home/shok/pcans') # 実行場所
+FIELD_DIR = os.path.join(BASE_DIR, 'python/extracted_data') # 電磁場データの場所
+PSD_DIR = os.path.join(BASE_DIR, 'em2d_mpi/md_mrx/psd') # 粒子データの場所
 OUTPUT_DIR = os.path.join(BASE_DIR, 'particle_gca_results') # 出力先
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
