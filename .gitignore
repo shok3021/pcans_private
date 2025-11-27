@@ -24,5 +24,8 @@ heating_plots_final/
 heating_plots_kappaetc/
 heating_plots_pressureetc/
 mirror_analysis/
-particle_gca_plots/
+gca_single_plots/
 energization_plots_final/
+particle_gca_density_weighted_plots/
+gca_bulk_plots/
+gca_single_times_density_weighted_plots/
