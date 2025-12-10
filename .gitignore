@@ -6,9 +6,11 @@
 
 # Data & Log files
 dat/*.dat
-dat_default/*.dat
 !dat/init_param.dat
 !dat/energy.dat
+dat_default/*.dat
+!dat_default/init_param.dat
+!dat_default/energy.dat
 mom/
 md_mrx/psd/
 md_mrx/psd_default/
