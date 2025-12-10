@@ -259,7 +259,7 @@ def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu
 
     cbar = plt.colorbar(cf, ax=ax, format=formatter_str, ticks=plot_ticks)
     
-    cbar.set_label(label)
+    cbar.set_label(label) # rcParamsで大きくしたサイズが適用される
 
     try:
         # dxは相対的な形状には影響しないので1.0で計算
@@ -269,9 +269,10 @@ def plot_single_panel(ax, X, Y, Z, Bx, By, title, label, omega_t_str, cmap='RdBu
     except Exception as e:
         print(f"磁力線描画エラー: {e}")
     
+    # ★ 変更: ポスター用にフォントサイズを大きく (fontsize=24)
     ax.text(0.98, 0.98, omega_t_str, 
             transform=ax.transAxes, 
-            fontsize=12, 
+            fontsize=24, 
             fontweight='bold',
             color='black',
             ha='right', 
@@ -305,12 +306,13 @@ def plot_combined(ax, X, Y, Z, Bx, By, title, label, cmap, vmin, vmax, tag_key, 
     if not np.isclose(vmin, vmax):
         plot_ticks = np.linspace(vmin, vmax, num_ticks)
 
+    # ★ 変更: カラーバーのラベルと目盛りを大きく
     cbar = plt.colorbar(cf, ax=ax, format=formatter_str, 
                         shrink=0.9, aspect=30, pad=0.02,
                         ticks=plot_ticks)
     
-    cbar.set_label(label, fontsize=7)
-    cbar.ax.tick_params(labelsize=6)
+    cbar.set_label(label, fontsize=14) # ★ 7 -> 14
+    cbar.ax.tick_params(labelsize=12)  # ★ 6 -> 12
 
     try:
         Psi_local = cumtrapz(By, dx=1.0, axis=1, initial=0)
@@ -318,10 +320,11 @@ def plot_combined(ax, X, Y, Z, Bx, By, title, label, cmap, vmin, vmax, tag_key, 
     except Exception as e:
         print(f"磁力線描画エラー: {e}")
                   
-    ax.set_title(title, fontsize=10)
-    ax.set_xlabel('$x/d_i$', fontsize=8)
-    ax.set_ylabel('$y/d_i$', fontsize=8)
-    ax.tick_params(direction='in', top=True, right=True, labelsize=7)
+    # ★ 変更: タイトル、軸ラベル、目盛りを大きく
+    ax.set_title(title, fontsize=18)    # ★ 10 -> 18
+    ax.set_xlabel('$x/d_i$', fontsize=16) # ★ 8 -> 16
+    ax.set_ylabel('$y/d_i$', fontsize=16) # ★ 8 -> 16
+    ax.tick_params(direction='in', top=True, right=True, labelsize=14) # ★ 7 -> 14
     
     return cf
 
@@ -480,7 +483,8 @@ def process_timestep(timestep):
     
     fig, axes = plt.subplots(5, 4, figsize=(15, 18), sharex=True, sharey=True)
     ax_list = axes.flatten()
-    fig.suptitle(f"Timestep: {timestep}  ({omega_t_str})", fontsize=16, fontweight='bold')
+    # ★ 変更: 統合パネルの全体タイトルを大きく (fontsize=30)
+    fig.suptitle(f"Timestep: {timestep}  ({omega_t_str})", fontsize=30, fontweight='bold')
     
     # (b) 統合パネル用のリスト
     # --- [修正] ラベルを eV に変更 ---
@@ -537,6 +541,15 @@ def process_timestep(timestep):
 if __name__ == "__main__":
     plt.rcParams['mathtext.fontset'] = 'cm'
     plt.rcParams['font.family'] = 'serif'
+    
+    # ★★★ ポスター用に全体のフォント設定を更新 ★★★
+    plt.rcParams['font.size'] = 20        # 基本フォントサイズ
+    plt.rcParams['axes.titlesize'] = 24   # 軸タイトル
+    plt.rcParams['axes.labelsize'] = 22   # 軸ラベル
+    plt.rcParams['xtick.labelsize'] = 18  # X軸目盛り
+    plt.rcParams['ytick.labelsize'] = 18  # Y軸目盛り
+    plt.rcParams['legend.fontsize'] = 18  # 凡例
+    plt.rcParams['figure.titlesize'] = 28 # 図全体のタイトル
     
     if len(sys.argv) != 4:
         print("使用方法: python visual_fields.py [start_timestep] [end_timestep] [interval]")

@@ -32,16 +32,16 @@ TARGET_BINS = [
 
 # ビンごとのVMAX設定
 BIN_VMAX_MAP = {
-    '001keV_100keV':    1.0e4,
-    '100keV_200keV':    1.0e3,
-    '200keV_500keV':    1.0e2,
-    '500keV_1000keV':   1.0e2,
-    '1000keV_2000keV':  1.0e1,
-    '2000keV_5000keV':  1.0e1,
-    '5000keV_10000keV': 1.0e1,
-    '10000keV_20000keV': 1.0e1,
-    '20000keV_50000keV': 1.0e1,
-    '50000keV_over':     1.0e1
+    '001keV_100keV':    1e10,
+    '100keV_200keV':    1e10,
+    '200keV_500keV':    1e10,
+    '500keV_1000keV':    1e10,
+    '1000keV_2000keV':  1e10,
+    '2000keV_5000keV':  1e10,
+    '5000keV_10000keV': 1e10,
+    '10000keV_20000keV': 1e10,
+    '20000keV_50000keV': 1e10,
+    '50000keV_over':     1e10
 }
 
 # グリッド設定

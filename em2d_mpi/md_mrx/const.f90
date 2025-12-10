@@ -3,7 +3,7 @@ module const
   implicit none
 
 !!************************ NUMERICAL CONSTANTS ***********************************!!
-  integer, parameter :: nx   = 320+1     ! NUMBER OF GRID POINTS IN X
+  integer, parameter :: nx   = 1600+1 ! for thin harris sheet !Default:320+1     ! NUMBER OF GRID POINTS IN X
   integer, parameter :: ny   = 640       ! NUMBER OF GRID POINTS IN Y
   integer, parameter :: nxgs = 2         ! START POINT IN X
   integer, parameter :: nxge = nxgs+nx-1 ! END POINT
@@ -27,7 +27,7 @@ module const
 !! OTHER CONSTANTS
   real(8), parameter :: gfac   = 0.501D0 !IMPLICITNESS FACTOR > 0.5
   real(8), parameter :: cfl    = 0.5D0   !CFL CONDITION FOR LIGHT WAVE
-  real(8), parameter :: delx   = 1.0D0   !CELL WIDTH
+  real(8), parameter :: delx   = 0.2D0 ! for thin harris sheet !default: 1.0D0   !CELL WIDTH
   real(8), parameter :: rdbl   = 1.0D0   !DEBYE LENGTH / CELL WIDTH
   real(8), parameter :: pi     = 4.0D0*atan(1.0D0)
 
@@ -40,9 +40,9 @@ module const
 !! ncs,ngb : HARRIS SHEET DENSITY AND THE BACKGROUND DENSITY
 !!     lcs : CURRENT SHEET THICKNESS IN UNIT OF ION SKIN DEPTH
   real(8), parameter :: c      = 1.0D0
-  real(8), parameter :: mr     = 16.0D0
+  real(8), parameter :: mr     = 100.0D0 ! for better physics !default: 16.0D0
   real(8), parameter :: alpha  = 2.0D0, beta = 0.5D0, rtemp=0.25D0
   integer, parameter :: ncs    = 250, nbg  =  50
-  real(8)            :: lcs    = 0.5D0
+  real(8)            :: lcs    = 0.1D0 ! for thin harris sheet ! default: 0.5D0
 
 end module

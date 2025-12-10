@@ -1,6 +1,0 @@
-Loading intel/2025.1
-  Loading requirement: advisor/2025.1 ccl/2021.15.0 tbb/2022.1
-    compiler-rt/2025.1.0 umf/0.10.0 compiler/2025.1.0 debugger/2025.1.0
-    dev-utilities/2025.1.0 dnnl/3.7.1 dpct/2025.1.0 dpl/2022.8
-    intel_ipp_intel64/2022.1 intel_ippcp_intel64/2025.1 ishmem/1.3.0 mkl/2025.1
-    mpi/2021.15 vtune/2025.1

@@ -1,5 +1,0 @@
-rm -f a.out const.o init.o main.o *.mod dat/*.dat mom/*.dat psd/*.dat
-mpif90 -L.. -O2 -I ../common -c const.f90 -lem2d
-mpif90 -L.. -O2 -I ../common -c init.f90 -lem2d
-mpif90 -L.. -O2 -I ../common -c main.f90 -lem2d
-mpif90 -L.. -o a.out -O2 const.o init.o main.o -lem2d 
