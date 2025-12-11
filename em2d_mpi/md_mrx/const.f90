@@ -13,7 +13,7 @@ module const
   integer, parameter :: nsfo = 1         ! SHAPE FUNCTION ORDER (0:NGP, 1:CIC, 2:SPLINE)
   integer, parameter :: nsp  = 2         ! NUMBER OF PARTICLE SPECIES
   integer, parameter :: bc   = -1        ! BOUNDARY CONDITION (PERIODIC:0, REFLECTIVE:-1)
-  integer, parameter :: nproc = 12       ! NUMBER OF PROCESSORS
+  integer, parameter :: nproc = 160 ! for thin harris sheet !default: 12       ! NUMBER OF PROCESSORS
 
 !! SETUP FOR SUBROUTINES CALLED IN MAIN PROGRAM
   integer, parameter :: itmax  = 50000	!NUMBER OF ITERATION
