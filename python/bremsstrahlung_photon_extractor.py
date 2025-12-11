@@ -160,7 +160,7 @@ def main():
     start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
     
     # 必要に応じてパスを変更してください
-    DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
+    DATA_DIR = '/dat/shok/psd/'
     
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')

@@ -18,7 +18,7 @@ Y_MIN = 0.0
 Y_MAX = GLOBAL_NY_PHYS * DELX 
 
 # パラメータファイルのパス
-PARAM_FILE_PATH = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/init_param.dat')
+PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
 
 # 定数: 電子の静止質量エネルギー (eV)
 # mc^2 (J) / e (C) = eV
@@ -175,7 +175,7 @@ def main():
     end_step   = int(sys.argv[2])
     step_size  = int(sys.argv[3])
 
-    data_dir = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/psd/')
+    data_dir = os.path.join('/data/shok/psd/')
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.') 
     OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_psd_data_moments') 

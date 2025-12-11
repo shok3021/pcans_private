@@ -8,7 +8,7 @@ program main
 
   logical           :: lflag=.true.
   integer           :: nproc, ndata, idata, irank
-  character(len=64) :: dir
+  ! character(len=64) :: dir  ! 不要になった場合は削除可能
   character(len=64) :: ifile
   real(8)           :: x0, y0, dx, dy
   character(len=64) :: xpos, ypos
@@ -18,7 +18,7 @@ program main
   call getarg(2,ypos)
   read(xpos,*)x0
   read(ypos,*)y0
-  call getarg(3,dir)
+  ! call getarg(3,dir) ! パスを固定するため、引数からの読み込みはコメントアウトまたは削除
 
   write(*,*)'No. of processes?'
   read(*,*)nproc
@@ -37,7 +37,7 @@ program main
 
         call particle__solv(up,uf,c,q,r,0.5*delt,np,nxgs,nxge,nygs,nyge,nys,nye,nsp,np2)
         call boundary__particle(up,np,nys,nye,nxgs,nxge,nygs,nyge,nsp,np2,bc)
-        call fio__psd(up,x0,y0,dx*delx,dy*delx,np,nys,nye,nsp,np2,it0,trim(dir)//'/psd/')
+        call fio__psd(up,x0,y0,dx*delx,dy*delx,np,nys,nye,nsp,np2,it0,'/data/shok/psd/')
 
         deallocate(np2)
         deallocate(up)

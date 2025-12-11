@@ -192,7 +192,7 @@ def main():
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.')
     
-    DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
+    DATA_DIR = '/dat/shok/psd/'
     # 出力フォルダ名を変更
     OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'electron_energy_density')
     

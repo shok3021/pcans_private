@@ -185,7 +185,7 @@ def main():
     print(f"--- 処理範囲: 開始={start_step}, 終了={end_step}, 間隔={step_size} ---")
     
     # 環境に応じてこのパスを調整してください
-    data_dir = os.path.join('/home/shok/pcans/em2d_mpi/md_mrx/dat/')
+    data_dir = os.path.join('/data/shok/dat/')
     
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_data') 

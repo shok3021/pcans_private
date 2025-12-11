@@ -191,7 +191,7 @@ def main():
     start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
     
     # ★ データパス設定
-    DATA_DIR = '/home/shok/pcans/em2d_mpi/md_mrx/psd/'
+    DATA_DIR = '/data/shok/psd/'
     
     # 出力フォルダ
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -20,7 +20,7 @@ module const
   integer            :: it0    = 0	!0:INITIAL, NONZERO/9999999: RESTART DATA
   integer, parameter :: intvl1 = 500	!INTERVAL FOR PARTICLES & FIELDS STORAGE
   integer, parameter :: intvl2 = 50	!INTERVAL FOR ENERGY CALC.
-  character(len=128) :: dir    = './dat/'	!DIRECTORY FOR OUTPUT
+  character(len=128) :: dir    = '/data/shok/dat/'	!DIRECTORY FOR OUTPUT
   character(len=128) :: fname_param  = 'init_param.dat'	!FILE NAME OF INIT CONDITIONS
   character(len=128) :: fname_energy = 'energy.dat'	!FILE NAME OF PARTICLE DATA
 
