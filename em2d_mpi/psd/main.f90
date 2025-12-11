@@ -23,7 +23,7 @@ program main
   write(*,*)'No. of processes?'
   read(*,*)nproc
 
-  dx = 321.0 !sampling area in the x direction
+  dx = 1601.0 !sampling area in the x direction
   dy = 640.0 !sampling area in the y direction
 
 
