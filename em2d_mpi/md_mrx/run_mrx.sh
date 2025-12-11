@@ -11,7 +11,7 @@ cd ${PBS_O_WORKDIR}
 
 export FC=$(which mpif90)
 
-make clean
-make
+# make clean
+# make
 
 mpirun ./a.out
