@@ -99,7 +99,7 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'final_plots')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.join(OUTPUT_DIR, 'allcombined'), exist_ok=True) # 統合パネル用
 
-PARAM_FILE_PATH = os.path.join('/Users/shohgookazaki/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/init_param.dat') 
+PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat') 
 
 C_LIGHT, FPI, DT, FGI, VA0, MI, QI = load_simulation_parameters(PARAM_FILE_PATH)
 DI = C_LIGHT / FPI
