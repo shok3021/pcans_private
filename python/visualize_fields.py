@@ -10,17 +10,20 @@ from scipy.integrate import cumtrapz
 
 def load_simulation_parameters(param_filepath):
     """
-    init_param.dat (または同等のログファイル) を読み込み、
-    C_LIGHT, FPI (omega_pi), DT (dt), FGI (Omega_ci),
-    VA0 (Alfvén velocity), MI (イオン質量), QI (イオン電荷) を抽出する。
+    init_param.dat を読み込み、
+    NX, NY, DELX, C_LIGHT, FPI, DT, FGI, VA0, MI, QI を抽出する。
     """
+    # 初期化
+    NX = None
+    NY = None
+    DELX = None
     C_LIGHT = None
     FPI = None
-    DT = None  # (dt)
-    FGI = None # (Omega_ci)
-    VA0 = None # (Alfvén velocity)
-    MI = None  # (イオン質量 r(1))
-    QI = None  # (イオン電荷 q(1))
+    DT = None
+    FGI = None
+    VA0 = None
+    MI = None
+    QI = None
     
     print(f"パラメータファイルを読み込み中: {param_filepath}")
 
@@ -29,61 +32,83 @@ def load_simulation_parameters(param_filepath):
             for line in f:
                 stripped_line = line.strip()
                 
-                if stripped_line.startswith('dx, dt, c'):
+                # --- 新規追加: Grid Size の読み込み ---
+                if stripped_line.startswith('grid size, debye lngth'):
                     try:
                         parts = stripped_line.split()
+                        # parts例: ['grid', 'size,', '...', '=======>', '321x', '640', '1.0000']
+                        # '321x' から 'x' を除去して数値化
+                        raw_nx = int(parts[5].replace('x', ''))
+                        raw_ny = int(parts[6])
+                        
+                        # ★重要: ファイル値(Nodes)から1引いて物理セル数(Cells)にする
+                        # もしデータ配列のサイズが321x640そのものの場合は -1 を削除してください
+                        NX = raw_nx - 1
+                        NY = raw_ny - 1
+                        
+                        # dx もこの行の末尾にありますが、念のため取得
+                        if len(parts) > 7:
+                            DELX = float(parts[7])
+                            
+                        print(f"  -> Grid Size検出: file={raw_nx}x{raw_ny} => use={NX}x{NY}")
+                    except (IndexError, ValueError):
+                        print(f"  -> エラー: 'grid size' の解析に失敗。行: {line}")
+
+                # --- 既存: dx, dt, c ---
+                elif stripped_line.startswith('dx, dt, c'):
+                    try:
+                        parts = stripped_line.split()
+                        # parts例: ['dx,', 'dt,', 'c', '====>', '1.0000', '0.5000', '1.0000']
+                        # dx がまだ設定されていない場合はここから取る (index 4)
+                        if DELX is None:
+                            DELX = float(parts[4])
+                        
                         DT = float(parts[5])
                         C_LIGHT = float(parts[6])
-                        print(f"  -> 'dt' の値を検出: {DT}")
-                        print(f"  -> 'c' の値を検出: {C_LIGHT}")
+                        print(f"  -> 'dx'={DELX}, 'dt'={DT}, 'c'={C_LIGHT} を検出")
                     except (IndexError, ValueError):
-                        print(f"  -> エラー: 'dx, dt, c' の値の解析に失敗。行: {line}")
+                        print(f"  -> エラー: 'dx, dt, c' の解析に失敗。行: {line}")
 
                 elif stripped_line.startswith('Mi, Me'):
                     try:
                         parts = stripped_line.split()
                         MI = float(parts[3])
                         print(f"  -> 'Mi' (MI) の値を検出: {MI}")
-                    except (IndexError, ValueError):
-                        print(f"  -> エラー: 'Mi, Me' の値の解析に失敗。行: {line}")
+                    except (IndexError, ValueError): pass
 
                 elif stripped_line.startswith('Qi, Qe'):
                     try:
                         parts = stripped_line.split()
                         QI = float(parts[3])
                         print(f"  -> 'Qi' (QI) の値を検出: {QI}")
-                    except (IndexError, ValueError):
-                        print(f"  -> エラー: 'Qi, Qe' の値の解析に失敗。行: {line}")
+                    except (IndexError, ValueError): pass
                         
                 elif stripped_line.startswith('Fpe, Fge, Fpi Fgi'):
                     try:
                         parts = stripped_line.split()
                         FPI = float(parts[7])
                         FGI = float(parts[8])
-                        print(f"  -> 'Fpi' の値を検出: {FPI}")
-                        print(f"  -> 'Fgi' (FGI) の値を検出: {FGI}")
-                    except (IndexError, ValueError):
-                        print(f"  -> エラー: 'Fpe, Fge, Fpi Fgi' の値の解析に失敗。行: {line}")
+                        print(f"  -> 'Fpi'={FPI}, 'Fgi'={FGI} を検出")
+                    except (IndexError, ValueError): pass
 
                 elif stripped_line.startswith('Va, Vi, Ve'):
                     try:
                         parts = stripped_line.split()
                         VA0 = float(parts[7])
                         print(f"  -> 'Va' (VA0) の値を検出: {VA0}")
-                    except (IndexError, ValueError):
-                        print(f"  -> エラー: 'Va, Vi, Ve' の値の解析に失敗。行: {line}")
+                    except (IndexError, ValueError): pass
 
     except FileNotFoundError:
         print(f"★★ エラー: パラメータファイルが見つかりません: {param_filepath}")
-        print("     規格化パラメータの読み込みに失敗しました。スクリプトを終了します。")
         sys.exit(1)
         
-    if C_LIGHT is None or FPI is None or DT is None or FGI is None or VA0 is None or MI is None or QI is None:
-        print("★★ エラー: ファイルから必要なパラメータ ('c', 'Fpi', 'dt', 'Fgi', 'Va', 'Mi', 'Qi') のいずれかを抽出できませんでした。")
-        print("     ファイルの内容を確認してください。スクリプトを終了します。")
+    # 必須パラメータチェック
+    required_vars = [NX, NY, DELX, C_LIGHT, FPI, DT, FGI, VA0, MI, QI]
+    if any(v is None for v in required_vars):
+        print("★★ エラー: 必要なパラメータの一部が抽出できませんでした。init_param.datの形式を確認してください。")
         sys.exit(1)
         
-    return C_LIGHT, FPI, DT, FGI, VA0, MI, QI
+    return NX, NY, DELX, C_LIGHT, FPI, DT, FGI, VA0, MI, QI
 
 # =======================================================
 # 設定と定数
@@ -101,7 +126,8 @@ os.makedirs(os.path.join(OUTPUT_DIR, 'allcombined'), exist_ok=True) # 統合パ�
 
 PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat') 
 
-C_LIGHT, FPI, DT, FGI, VA0, MI, QI = load_simulation_parameters(PARAM_FILE_PATH)
+GLOBAL_NX_PHYS, GLOBAL_NY_PHYS, DELX, C_LIGHT, FPI, DT, FGI, VA0, MI, QI = load_simulation_parameters(PARAM_FILE_PATH)
+
 DI = C_LIGHT / FPI
 B0 = (FGI * MI * C_LIGHT) / QI
 
@@ -137,9 +163,7 @@ GLOBAL_PLOT_RANGES = {
     'Vzi': (-2.0, 2.0),
 }
 
-GLOBAL_NX_PHYS = 320
-GLOBAL_NY_PHYS = 639
-DELX = 1.0
+
 
 # =======================================================
 # ヘルパー関数 (データ読み込み・計算)
