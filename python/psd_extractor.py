@@ -4,24 +4,88 @@ import sys
 from scipy.constants import m_e, c, elementary_charge
 
 # =======================================================
-# 設定 (変更なし)
+# 1. 設定ファイルのパス定義
 # =======================================================
-GLOBAL_NX_GRID_POINTS = 1601  
-GLOBAL_NY_GRID_POINTS = 640
+# ここだけは環境に合わせて確認してください
+PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
+REST_MASS_E_EV = (m_e * c**2) / elementary_charge
+
+# =======================================================
+# 2. パラメータ自動読み込み関数 (追加)
+# =======================================================
+def load_grid_params(param_filepath):
+    """
+    init_param.dat から NX, NY, DELX を読み取る関数
+    見つからない場合はデフォルト値 (1601, 640, 0.2) を返す安全設計
+    """
+    # デフォルト値 (万が一読み込めない場合)
+    nx_val = 1601
+    ny_val = 640
+    delx_val = 0.2
+    
+    if not os.path.exists(param_filepath):
+        print(f"警告: {param_filepath} が見つかりません。デフォルト値を使用します。")
+        return nx_val, ny_val, delx_val
+
+    print(f"パラメータファイルを読み込み中: {param_filepath}")
+    try:
+        with open(param_filepath, 'r') as f:
+            for line in f:
+                stripped = line.strip()
+                
+                # グリッドサイズ (例: ... =======>     1601x     640 ...)
+                if stripped.startswith('grid size, debye lngth'):
+                    try:
+                        parts = stripped.split()
+                        # '1601x' のように x がついている場合に対応
+                        nx_str = parts[5].replace('x', '')
+                        nx_val = int(nx_str)
+                        ny_val = int(parts[6])
+                        
+                        # 同じ行に dx がある場合もあるが、下のブロックで取得したほうが確実
+                        print(f"  -> Grid Size検出: NX={nx_val}, NY={ny_val}")
+                    except Exception as e:
+                        print(f"  -> Grid解析エラー: {e}")
+
+                # dx, dt, c (例: dx, dt, c  ====>     0.2000    0.1000 ...)
+                elif stripped.startswith('dx, dt, c'):
+                    try:
+                        parts = stripped.split()
+                        delx_val = float(parts[4])
+                        print(f"  -> DELX検出: {delx_val}")
+                    except Exception as e:
+                        print(f"  -> dx解析エラー: {e}")
+                        
+    except Exception as e:
+        print(f"ファイル読み込み中にエラー発生: {e}")
+
+    return nx_val, ny_val, delx_val
+
+# =======================================================
+# 3. 定数の自動設定 (ここが自動化されました)
+# =======================================================
+# 関数を呼んで値をセット
+_nx_grid, _ny_grid, _delx = load_grid_params(PARAM_FILE_PATH)
+
+GLOBAL_NX_GRID_POINTS = _nx_grid
+GLOBAL_NY_GRID_POINTS = _ny_grid
+DELX = _delx
+
+# 物理定数の計算
 GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 
 GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 
-DELX = 1.0 
 
 X_MIN = 0.0           
 X_MAX = GLOBAL_NX_PHYS * DELX 
 Y_MIN = 0.0           
 Y_MAX = GLOBAL_NY_PHYS * DELX 
 
-PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
-REST_MASS_E_EV = (m_e * c**2) / elementary_charge
+print(f"--- 設定完了: NX={GLOBAL_NX_GRID_POINTS}, NY={GLOBAL_NY_GRID_POINTS}, dx={DELX} ---")
+print(f"--- 物理領域: X=[0, {X_MAX:.1f}], Y=[0, {Y_MAX:.1f}] ---")
+
 
 # =======================================================
-# ヘルパー関数 & 計算エンジン (変更なし)
+# 4. ヘルパー関数 & 計算エンジン (変更なし)
 # =======================================================
 def load_mi_from_param(param_filepath):
     mi_val = 1.0
@@ -39,7 +103,7 @@ def load_mi_from_param(param_filepath):
     return mi_val
 
 def calculate_moments_relativistic(particle_data):
-    # ... (前回のコードと同じため省略、変更なし) ...
+    # 関数内でもグローバル定数を参照して計算します
     NX = GLOBAL_NX_PHYS
     NY = GLOBAL_NY_PHYS
     x_min, x_max = X_MIN, X_MAX
@@ -125,10 +189,9 @@ def save_data_to_txt(data_2d, label, timestep, species, out_dir, filename):
     print(f"  Saved: {species} {filename}")
 
 # =======================================================
-# メイン (修正箇所)
+# 5. メイン実行ブロック
 # =======================================================
 def main():
-    # 引数が5個(スクリプト名含め6個)あるか確認
     if len(sys.argv) < 6:
         print("Usage: python psd_extractor_relativistic.py [start] [end] [step] [id1] [id2]")
         print("Example: python psd_extractor_relativistic.py 0 1000 100 0160 0064")
@@ -138,16 +201,14 @@ def main():
     end_step   = int(sys.argv[2])
     step_size  = int(sys.argv[3])
     
-    # 文字列として取得 (0埋めなどをそのまま維持するため)
-    file_id_1  = sys.argv[4]  # 例: '0160'
-    file_id_2  = sys.argv[5]  # 例: '0064'
+    file_id_1  = sys.argv[4]  # '0160'
+    file_id_2  = sys.argv[5]  # '0064'
 
     data_dir = os.path.join('/data/shok/psd/')
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     except: SCRIPT_DIR = os.path.abspath('.') 
     
-    # 出力フォルダ名にIDを含めると整理しやすいかもしれません（任意）
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, f'extracted_psd_data_moments') 
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_psd_data_moments') 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     MI_RATIO = load_mi_from_param(PARAM_FILE_PATH)
@@ -162,7 +223,6 @@ def main():
         print(f"\n=== Processing TS: {timestep} ===")
 
         for suffix, species_label in species_list:
-            # ファイル名を動的に生成
             filename = f'{timestep}_{file_id_1}-{file_id_2}_psd_{suffix}.dat'
             filepath = os.path.join(data_dir, filename)
 
@@ -175,15 +235,18 @@ def main():
             
             density, av_vx, av_vy, av_vz, T_norm = calculate_moments_relativistic(particle_data)
 
-            # eVへの変換
             if species_label == 'electron':
                 Temperature_eV = T_norm * REST_MASS_E_EV
             elif species_label == 'ion':
                 Temperature_eV = T_norm * (REST_MASS_E_EV * MI_RATIO)
             
-            max_T = np.max(Temperature_eV)
-            mean_T = np.mean(Temperature_eV[density > 0])
-            print(f"     Max T: {max_T:.2f} eV, Mean T: {mean_T:.2f} eV")
+            # デバッグ表示用
+            if np.any(density > 0):
+                max_T = np.max(Temperature_eV)
+                mean_T = np.mean(Temperature_eV[density > 0])
+                print(f"     Max T: {max_T:.2f} eV, Mean T: {mean_T:.2f} eV")
+            else:
+                print("     No density found.")
 
             save_data_to_txt(density, 'Density', timestep, species_label, OUTPUT_DIR, 'density_count')
             save_data_to_txt(av_vx, 'Vx', timestep, species_label, OUTPUT_DIR, 'Vx')
