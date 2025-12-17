@@ -6,7 +6,7 @@ from scipy.constants import m_e, c, elementary_charge
 # =======================================================
 # 設定 (変更なし)
 # =======================================================
-GLOBAL_NX_GRID_POINTS = 321  
+GLOBAL_NX_GRID_POINTS = 1601  
 GLOBAL_NY_GRID_POINTS = 640
 GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 
 GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 
