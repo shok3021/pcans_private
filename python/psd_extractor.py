@@ -147,7 +147,7 @@ def main():
     except: SCRIPT_DIR = os.path.abspath('.') 
     
     # 出力フォルダ名にIDを含めると整理しやすいかもしれません（任意）
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, f'extracted_psd_{file_id_1}_{file_id_2}_moments') 
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, f'extracted_psd_data_moments') 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     MI_RATIO = load_mi_from_param(PARAM_FILE_PATH)
