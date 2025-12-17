@@ -7,7 +7,7 @@ program main
   implicit none
 
   logical           :: lflag=.true.
-  integer           :: nproc, ndata, idata, irank
+  integer           :: nx, ny, nproc, ndata, idata, irank
   ! character(len=64) :: dir  ! 不要になった場合は削除可能
   character(len=64) :: ifile
   real(8)           :: x0, y0, dx, dy
@@ -23,8 +23,8 @@ program main
   write(*,*)'No. of processes?'
   read(*,*)nproc
 
-  dx = 1601-1 !sampling area in the x direction
-  dy = 640 !sampling area in the y direction
+  dx = nx !sampling area in the x direction
+  dy = ny !sampling area in the y direction
 
 
   do idata=4,ndata,nproc
