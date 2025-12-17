@@ -9,7 +9,7 @@ from scipy.constants import m_e, c, elementary_charge
 # Fortranが出力した粒子位置データが「物理座標(0~320)」なら True
 # 「グリッド番号(0~1600)」なら False にしてください。
 # ★左下に縮まるなら、ここを True に変えてください★
-IS_RAW_DATA_NORMALIZED = False 
+IS_RAW_DATA_NORMALIZED = True
 
 PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
 REST_MASS_E_EV = (m_e * c**2) / elementary_charge
