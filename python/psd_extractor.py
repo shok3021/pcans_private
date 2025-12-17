@@ -192,7 +192,7 @@ def main():
         print(f"\n=== Processing TS: {timestep} ===")
 
         for suffix, species_label in species_list:
-            filename = f'{timestep}_0160-0320_psd_{suffix}.dat'
+            filename = f'{timestep}_0160-0064_psd_{suffix}.dat'
             filepath = os.path.join(data_dir, filename)
 
             particle_data = load_text_data(filepath)
