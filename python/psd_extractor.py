@@ -4,235 +4,189 @@ import sys
 from scipy.constants import m_e, c, elementary_charge
 
 # =======================================================
-# 1. 設定ファイルのパス定義
+# 設定: データ読み込みの制御
 # =======================================================
+# Fortranが出力した粒子位置データが「物理座標(0~320)」なら True
+# 「グリッド番号(0~1600)」なら False にしてください。
+# ★左下に縮まるなら、ここを True に変えてください★
+IS_RAW_DATA_NORMALIZED = False 
+
 PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
 REST_MASS_E_EV = (m_e * c**2) / elementary_charge
 
 # =======================================================
-# 2. パラメータ自動読み込み関数
+# パラメータ読み込み (Clean版)
 # =======================================================
 def load_grid_params(param_filepath):
-    """
-    init_param.dat から NX, NY, DELX を読み取る
-    """
-    nx_val = 1601
-    ny_val = 640
-    delx_val = 0.2
+    """ init_param.dat からシミュレーション設定を読み込む """
+    # デフォルト値
+    params = {'nx': 1601, 'ny': 640, 'delx': 0.2}
     
     if not os.path.exists(param_filepath):
-        print(f"警告: {param_filepath} が見つかりません。デフォルト値を使用します。")
-        return nx_val, ny_val, delx_val
+        print(f"警告: {param_filepath} が見つかりません。デフォルト値を使います。")
+        return params
 
-    print(f"パラメータファイルを読み込み中: {param_filepath}")
     try:
         with open(param_filepath, 'r') as f:
             for line in f:
                 stripped = line.strip()
-                if stripped.startswith('grid size, debye lngth'):
-                    try:
-                        parts = stripped.split()
-                        nx_str = parts[5].replace('x', '')
-                        nx_val = int(nx_str)
-                        ny_val = int(parts[6])
-                        print(f"  -> Grid Size検出: NX={nx_val}, NY={ny_val}")
-                    except Exception as e:
-                        print(f"  -> Grid解析エラー: {e}")
-
-                elif stripped.startswith('dx, dt, c'):
-                    try:
-                        parts = stripped.split()
-                        delx_val = float(parts[4])
-                        print(f"  -> DELX検出: {delx_val}")
-                    except Exception as e:
-                        print(f"  -> dx解析エラー: {e}")
-                        
+                if stripped.startswith('grid size'):
+                    parts = stripped.split()
+                    params['nx'] = int(parts[5].replace('x', ''))
+                    params['ny'] = int(parts[6])
+                elif stripped.startswith('dx, dt'):
+                    parts = stripped.split()
+                    params['delx'] = float(parts[4])
     except Exception as e:
-        print(f"ファイル読み込み中にエラー発生: {e}")
-
-    return nx_val, ny_val, delx_val
-
-# =======================================================
-# 3. 定数の自動設定
-# =======================================================
-_nx_grid, _ny_grid, _delx = load_grid_params(PARAM_FILE_PATH)
-
-GLOBAL_NX_GRID_POINTS = _nx_grid
-GLOBAL_NY_GRID_POINTS = _ny_grid
-DELX = _delx
-
-GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 
-GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 
-
-X_MIN = 0.0           
-X_MAX = GLOBAL_NX_PHYS * DELX 
-Y_MIN = 0.0           
-Y_MAX = GLOBAL_NY_PHYS * DELX 
-
-print(f"--- 設定完了: NX={GLOBAL_NX_GRID_POINTS}, NY={GLOBAL_NY_GRID_POINTS}, dx={DELX} ---")
-print(f"--- 物理領域: X=[0, {X_MAX:.1f}], Y=[0, {Y_MAX:.1f}] ---")
-
-
-# =======================================================
-# 4. ヘルパー関数 & 計算エンジン
-# =======================================================
-def load_mi_from_param(param_filepath):
-    mi_val = 1.0
-    try:
-        if not os.path.exists(param_filepath):
-            return 100.0
-        with open(param_filepath, 'r') as f:
-            for line in f:
-                if line.strip().startswith('Mi, Me'):
-                    parts = line.split()
-                    mi_val = float(parts[3])
-                    return mi_val
-    except:
-        return 100.0
-    return mi_val
-
-def calculate_moments_relativistic(particle_data):
-    NX = GLOBAL_NX_PHYS
-    NY = GLOBAL_NY_PHYS
-    x_min, x_max = X_MIN, X_MAX
-    y_min, y_max = Y_MIN, Y_MAX 
-
-    # ★★★ ここが修正ポイント ★★★
-    # 粒子データの位置 (Grid Unit) に DELX を掛けて 物理座標 (Physical Unit) に変換する
-    X_pos = particle_data[:, 0] * DELX
-    Y_pos = particle_data[:, 1] * DELX
-    
-    ux = particle_data[:, 2]
-    uy = particle_data[:, 3]
-    uz = particle_data[:, 4]
-    
-    u_sq = ux**2 + uy**2 + uz**2
-    gamma_particle = np.sqrt(1.0 + u_sq)
-    E_kin_particle = gamma_particle - 1.0 
-
-    x_bins = np.linspace(x_min, x_max, NX + 1)
-    y_bins = np.linspace(y_min, y_max, NY + 1)
-
-    mask = (X_pos >= x_min) & (X_pos <= x_max) & \
-           (Y_pos >= y_min) & (Y_pos <= y_max)
-    
-    curr_X = X_pos[mask]
-    curr_Y = Y_pos[mask]
-    curr_ux = ux[mask]
-    curr_uy = uy[mask]
-    curr_uz = uz[mask]
-    curr_E  = E_kin_particle[mask]
-
-    H_count, _, _ = np.histogram2d(curr_Y, curr_X, bins=[y_bins, x_bins])
-    H_sum_ux, _, _ = np.histogram2d(curr_Y, curr_X, bins=[y_bins, x_bins], weights=curr_ux)
-    H_sum_uy, _, _ = np.histogram2d(curr_Y, curr_X, bins=[y_bins, x_bins], weights=curr_uy)
-    H_sum_uz, _, _ = np.histogram2d(curr_Y, curr_X, bins=[y_bins, x_bins], weights=curr_uz)
-    H_sum_E, _, _  = np.histogram2d(curr_Y, curr_X, bins=[y_bins, x_bins], weights=curr_E)
-
-    with np.errstate(divide='ignore', invalid='ignore'):
-        density_safe = H_count.copy()
-        density_safe[density_safe == 0] = 1.0
+        print(f"パラメータ読込エラー: {e}")
         
-        av_ux = H_sum_ux / density_safe
-        av_uy = H_sum_uy / density_safe
-        av_uz = H_sum_uz / density_safe
-        Mean_E_total = H_sum_E / density_safe
+    return params
 
-    u_fluid_sq = av_ux**2 + av_uy**2 + av_uz**2
-    gamma_fluid = np.sqrt(1.0 + u_fluid_sq)
-    E_bulk = gamma_fluid - 1.0
+# =======================================================
+# 定数設定
+# =======================================================
+p = load_grid_params(PARAM_FILE_PATH)
+
+GLOBAL_NX = p['nx'] - 1  # 物理セル数 (1600)
+GLOBAL_NY = p['ny'] - 1  # 物理セル数 (639)
+DELX      = p['delx']
+
+# ヒストグラムを作成する範囲 (常に物理サイズで定義)
+PHYS_W = GLOBAL_NX * DELX  # 320.0
+PHYS_H = GLOBAL_NY * DELX  # 127.8
+
+print(f"--- 設定: Grid=[{GLOBAL_NX}x{GLOBAL_NY}], dx={DELX} ---")
+print(f"--- 物理領域: X=[0, {PHYS_W:.1f}], Y=[0, {PHYS_H:.1f}] ---")
+
+# =======================================================
+# 計算エンジン
+# =======================================================
+def calculate_moments(particle_data):
+    # 1. 座標データの取得
+    raw_X = particle_data[:, 0]
+    raw_Y = particle_data[:, 1]
     
-    E_thermal = Mean_E_total - E_bulk
-    E_thermal = np.clip(E_thermal, 0.0, None)
+    # 2. 単位の正規化 (ここが重要)
+    # ヒストグラムは「物理座標」の枠で作るため、データを物理座標に合わせる
+    if IS_RAW_DATA_NORMALIZED:
+        # すでに物理座標なら何もしない
+        X_pos = raw_X
+        Y_pos = raw_Y
+    else:
+        # グリッド番号なら、delxを掛けて物理座標にする
+        X_pos = raw_X * DELX
+        Y_pos = raw_Y * DELX
+
+    ux, uy, uz = particle_data[:, 2], particle_data[:, 3], particle_data[:, 4]
+    
+    # エネルギー計算 (相対論)
+    gamma = np.sqrt(1.0 + ux**2 + uy**2 + uz**2)
+    E_kin = gamma - 1.0 
+
+    # 3. ヒストグラム(ビン)の設定
+    # 物理領域全体を、グリッド数分のビンで分割する
+    x_bins = np.linspace(0.0, PHYS_W, GLOBAL_NX + 1)
+    y_bins = np.linspace(0.0, PHYS_H, GLOBAL_NY + 1)
+
+    # 4. ビニング実行 (物理座標空間で行う)
+    # weightsを指定することで、その場所にある粒子の物理量を積算する
+    H_count, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_bins, x_bins])
+    H_sum_ux, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_bins, x_bins], weights=ux)
+    H_sum_uy, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_bins, x_bins], weights=uy)
+    H_sum_uz, _, _ = np.histogram2d(Y_pos, X_pos, bins=[y_bins, x_bins], weights=uz)
+    H_sum_E, _, _  = np.histogram2d(Y_pos, X_pos, bins=[y_bins, x_bins], weights=E_kin)
+
+    # 5. 平均値の計算 (ゼロ除算回避)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        density = H_count.copy()
+        density[density == 0] = 1.0 # 割り算用
+        
+        av_ux = H_sum_ux / density
+        av_uy = H_sum_uy / density
+        av_uz = H_sum_uz / density
+        mean_E = H_sum_E / density
+
+    # 温度計算
+    u_bulk_sq = av_ux**2 + av_uy**2 + av_uz**2
+    gamma_fluid = np.sqrt(1.0 + u_bulk_sq)
+    E_bulk = gamma_fluid - 1.0
+    E_thermal = np.clip(mean_E - E_bulk, 0.0, None)
     T_norm = (2.0 / 3.0) * E_thermal
 
+    # データがない場所はゼロ埋め
     mask_zero = (H_count == 0)
-    av_ux[mask_zero] = 0.0
-    av_uy[mask_zero] = 0.0
-    av_uz[mask_zero] = 0.0
-    T_norm[mask_zero] = 0.0
+    for arr in [av_ux, av_uy, av_uz, T_norm]:
+        arr[mask_zero] = 0.0
     
-    av_vx = av_ux / gamma_fluid
-    av_vy = av_uy / gamma_fluid
-    av_vz = av_uz / gamma_fluid
-    av_vx[mask_zero] = 0.0
-    av_vy[mask_zero] = 0.0
-    av_vz[mask_zero] = 0.0
-
-    return H_count, av_vx, av_vy, av_vz, T_norm
-
-def load_text_data(filepath):
-    if not os.path.exists(filepath):
-        return None
-    try:
-        data = np.loadtxt(filepath)
-        if data.ndim == 1:
-            if data.size == 0: return np.array([])
-            data = data.reshape(1, -1)
-        if data.size == 0: return np.array([])
-        return data
-    except:
-        return None
-
-def save_data_to_txt(data_2d, label, timestep, species, out_dir, filename):
-    output_file = os.path.join(out_dir, f'data_{timestep}_{species}_{filename}.txt')
-    np.savetxt(output_file, data_2d, fmt='%.10e', delimiter=',') 
-    print(f"  Saved: {species} {filename}")
+    # 速度を光速単位に変換して返す (u = gamma * v => v = u / gamma)
+    return H_count, av_ux/gamma_fluid, av_uy/gamma_fluid, av_uz/gamma_fluid, T_norm
 
 # =======================================================
-# 5. メイン実行ブロック
+# IO関数
+# =======================================================
+def load_mi():
+    try:
+        with open(PARAM_FILE_PATH, 'r') as f:
+            for line in f:
+                if 'Mi, Me' in line: return float(line.split()[3])
+    except: pass
+    return 100.0
+
+def save_txt(data, name, ts, sp, out_dir, tag):
+    path = os.path.join(out_dir, f'data_{ts}_{sp}_{tag}.txt')
+    np.savetxt(path, data, fmt='%.6e', delimiter=',')
+    print(f"    Saved: {name}")
+
+# =======================================================
+# メイン処理
 # =======================================================
 def main():
     if len(sys.argv) < 6:
-        print("Usage: python psd_extractor_relativistic.py [start] [end] [step] [id1] [id2]")
+        print("Usage: python psd_extractor.py [start] [end] [step] [id1] [id2]")
         sys.exit(1)
 
-    start_step = int(sys.argv[1])
-    end_step   = int(sys.argv[2])
-    step_size  = int(sys.argv[3])
-    file_id_1  = sys.argv[4]  
-    file_id_2  = sys.argv[5]  
+    start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+    fid1, fid2 = sys.argv[4], sys.argv[5]
 
     data_dir = os.path.join('/data/shok/psd/')
-    try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    except: SCRIPT_DIR = os.path.abspath('.') 
-    
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_psd_data_moments') 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else '.'
+    out_dir = os.path.join(script_dir, 'extracted_psd_data_moments')
+    os.makedirs(out_dir, exist_ok=True)
 
-    MI_RATIO = load_mi_from_param(PARAM_FILE_PATH)
-    print(f"--- Ion Mass Ratio set to: {MI_RATIO} ---")
-    print(f"--- Target File ID: {file_id_1}-{file_id_2} ---")
+    mi_ratio = load_mi()
+    print(f"--- Ion Mass Ratio: {mi_ratio} ---")
+    print(f"--- Mode: {'Normalized (0-320)' if IS_RAW_DATA_NORMALIZED else 'Grid (0-1600)'} ---")
 
-    species_list = [('e', 'electron'), ('i', 'ion')] 
+    for ts_val in range(start, end + step, step):
+        ts = f"{ts_val:06d}"
+        print(f"\n=== Processing TS: {ts} ===")
 
-    for current_step in range(start_step, end_step + step_size, step_size):
-        timestep = f"{current_step:06d}" 
-        print(f"\n=== Processing TS: {timestep} ===")
-
-        for suffix, species_label in species_list:
-            filename = f'{timestep}_{file_id_1}-{file_id_2}_psd_{suffix}.dat'
-            filepath = os.path.join(data_dir, filename)
-
-            particle_data = load_text_data(filepath)
-            if particle_data is None or particle_data.size == 0:
-                print(f"  Skipping {species_label} (no data)")
+        for sp_suffix, sp_name in [('e', 'electron'), ('i', 'ion')]:
+            fname = f'{ts}_{fid1}-{fid2}_psd_{sp_suffix}.dat'
+            path = os.path.join(data_dir, fname)
+            
+            if not os.path.exists(path):
+                print(f"  Skip: {sp_name} (No file)")
                 continue
 
-            print(f"  -> Calculating relativistic T for {species_label}...")
-            
-            density, av_vx, av_vy, av_vz, T_norm = calculate_moments_relativistic(particle_data)
+            try:
+                raw_data = np.loadtxt(path)
+                if raw_data.size == 0: raise ValueError("Empty")
+                if raw_data.ndim == 1: raw_data = raw_data.reshape(1, -1)
+            except:
+                print(f"  Skip: {sp_name} (Load Error)")
+                continue
 
-            if species_label == 'electron':
-                Temperature_eV = T_norm * REST_MASS_E_EV
-            elif species_label == 'ion':
-                Temperature_eV = T_norm * (REST_MASS_E_EV * MI_RATIO)
+            den, vx, vy, vz, t_norm = calculate_moments(raw_data)
             
-            save_data_to_txt(density, 'Density', timestep, species_label, OUTPUT_DIR, 'density_count')
-            save_data_to_txt(av_vx, 'Vx', timestep, species_label, OUTPUT_DIR, 'Vx')
-            save_data_to_txt(av_vy, 'Vy', timestep, species_label, OUTPUT_DIR, 'Vy')
-            save_data_to_txt(av_vz, 'Vz', timestep, species_label, OUTPUT_DIR, 'Vz')
-            save_data_to_txt(Temperature_eV, 'Temperature (eV)', timestep, species_label, OUTPUT_DIR, 'T')
+            # 温度のeV変換
+            t_ev = t_norm * REST_MASS_E_EV * (mi_ratio if sp_name == 'ion' else 1.0)
+
+            save_txt(den, 'Density', ts, sp_name, out_dir, 'density_count')
+            save_txt(vx,  'Vx', ts, sp_name, out_dir, 'Vx')
+            save_txt(vy,  'Vy', ts, sp_name, out_dir, 'Vy')
+            save_txt(vz,  'Vz', ts, sp_name, out_dir, 'Vz')
+            save_txt(t_ev, 'Temp(eV)', ts, sp_name, out_dir, 'T')
 
     print("\nDone.")
 
