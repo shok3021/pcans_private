@@ -4,7 +4,7 @@ import os
 import re # 正規表現モジュールをインポート
 
 # --- 1. ファイルパスの指定 ---
-base_dir = os.path.expanduser('~/Documents/GitHub/pcans/em2d_mpi/md_mrx/dat/')
+base_dir = os.path.expanduser('/data/shok/dat/')
 energy_file_path = os.path.join(base_dir, 'energy.dat')
 param_file_path = os.path.join(base_dir, 'init_param.dat')
 
