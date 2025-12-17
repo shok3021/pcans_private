@@ -6,19 +6,16 @@ from scipy.constants import m_e, c, elementary_charge
 # =======================================================
 # 1. 設定ファイルのパス定義
 # =======================================================
-# ここだけは環境に合わせて確認してください
 PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
 REST_MASS_E_EV = (m_e * c**2) / elementary_charge
 
 # =======================================================
-# 2. パラメータ自動読み込み関数 (追加)
+# 2. パラメータ自動読み込み関数
 # =======================================================
 def load_grid_params(param_filepath):
     """
-    init_param.dat から NX, NY, DELX を読み取る関数
-    見つからない場合はデフォルト値 (1601, 640, 0.2) を返す安全設計
+    init_param.dat から NX, NY, DELX を読み取る
     """
-    # デフォルト値 (万が一読み込めない場合)
     nx_val = 1601
     ny_val = 640
     delx_val = 0.2
@@ -32,22 +29,16 @@ def load_grid_params(param_filepath):
         with open(param_filepath, 'r') as f:
             for line in f:
                 stripped = line.strip()
-                
-                # グリッドサイズ (例: ... =======>     1601x     640 ...)
                 if stripped.startswith('grid size, debye lngth'):
                     try:
                         parts = stripped.split()
-                        # '1601x' のように x がついている場合に対応
                         nx_str = parts[5].replace('x', '')
                         nx_val = int(nx_str)
                         ny_val = int(parts[6])
-                        
-                        # 同じ行に dx がある場合もあるが、下のブロックで取得したほうが確実
                         print(f"  -> Grid Size検出: NX={nx_val}, NY={ny_val}")
                     except Exception as e:
                         print(f"  -> Grid解析エラー: {e}")
 
-                # dx, dt, c (例: dx, dt, c  ====>     0.2000    0.1000 ...)
                 elif stripped.startswith('dx, dt, c'):
                     try:
                         parts = stripped.split()
@@ -62,16 +53,14 @@ def load_grid_params(param_filepath):
     return nx_val, ny_val, delx_val
 
 # =======================================================
-# 3. 定数の自動設定 (ここが自動化されました)
+# 3. 定数の自動設定
 # =======================================================
-# 関数を呼んで値をセット
 _nx_grid, _ny_grid, _delx = load_grid_params(PARAM_FILE_PATH)
 
 GLOBAL_NX_GRID_POINTS = _nx_grid
 GLOBAL_NY_GRID_POINTS = _ny_grid
 DELX = _delx
 
-# 物理定数の計算
 GLOBAL_NX_PHYS = GLOBAL_NX_GRID_POINTS - 1 
 GLOBAL_NY_PHYS = GLOBAL_NY_GRID_POINTS - 1 
 
@@ -85,7 +74,7 @@ print(f"--- 物理領域: X=[0, {X_MAX:.1f}], Y=[0, {Y_MAX:.1f}] ---")
 
 
 # =======================================================
-# 4. ヘルパー関数 & 計算エンジン (変更なし)
+# 4. ヘルパー関数 & 計算エンジン
 # =======================================================
 def load_mi_from_param(param_filepath):
     mi_val = 1.0
@@ -103,14 +92,16 @@ def load_mi_from_param(param_filepath):
     return mi_val
 
 def calculate_moments_relativistic(particle_data):
-    # 関数内でもグローバル定数を参照して計算します
     NX = GLOBAL_NX_PHYS
     NY = GLOBAL_NY_PHYS
     x_min, x_max = X_MIN, X_MAX
     y_min, y_max = Y_MIN, Y_MAX 
 
-    X_pos = particle_data[:, 0]
-    Y_pos = particle_data[:, 1]
+    # ★★★ ここが修正ポイント ★★★
+    # 粒子データの位置 (Grid Unit) に DELX を掛けて 物理座標 (Physical Unit) に変換する
+    X_pos = particle_data[:, 0] * DELX
+    Y_pos = particle_data[:, 1] * DELX
+    
     ux = particle_data[:, 2]
     uy = particle_data[:, 3]
     uz = particle_data[:, 4]
@@ -194,15 +185,13 @@ def save_data_to_txt(data_2d, label, timestep, species, out_dir, filename):
 def main():
     if len(sys.argv) < 6:
         print("Usage: python psd_extractor_relativistic.py [start] [end] [step] [id1] [id2]")
-        print("Example: python psd_extractor_relativistic.py 0 1000 100 0160 0064")
         sys.exit(1)
 
     start_step = int(sys.argv[1])
     end_step   = int(sys.argv[2])
     step_size  = int(sys.argv[3])
-    
-    file_id_1  = sys.argv[4]  # '0160'
-    file_id_2  = sys.argv[5]  # '0064'
+    file_id_1  = sys.argv[4]  
+    file_id_2  = sys.argv[5]  
 
     data_dir = os.path.join('/data/shok/psd/')
     try: SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -213,7 +202,6 @@ def main():
 
     MI_RATIO = load_mi_from_param(PARAM_FILE_PATH)
     print(f"--- Ion Mass Ratio set to: {MI_RATIO} ---")
-    print(f"--- Electron Rest Energy: {REST_MASS_E_EV:.2f} eV ---")
     print(f"--- Target File ID: {file_id_1}-{file_id_2} ---")
 
     species_list = [('e', 'electron'), ('i', 'ion')] 
@@ -228,10 +216,10 @@ def main():
 
             particle_data = load_text_data(filepath)
             if particle_data is None or particle_data.size == 0:
-                print(f"  Skipping {species_label} (no data) at {filepath}")
+                print(f"  Skipping {species_label} (no data)")
                 continue
 
-            print(f"  -> Calculating relativistic T (bulk-subtracted) for {species_label}...")
+            print(f"  -> Calculating relativistic T for {species_label}...")
             
             density, av_vx, av_vy, av_vz, T_norm = calculate_moments_relativistic(particle_data)
 
@@ -240,14 +228,6 @@ def main():
             elif species_label == 'ion':
                 Temperature_eV = T_norm * (REST_MASS_E_EV * MI_RATIO)
             
-            # デバッグ表示用
-            if np.any(density > 0):
-                max_T = np.max(Temperature_eV)
-                mean_T = np.mean(Temperature_eV[density > 0])
-                print(f"     Max T: {max_T:.2f} eV, Mean T: {mean_T:.2f} eV")
-            else:
-                print("     No density found.")
-
             save_data_to_txt(density, 'Density', timestep, species_label, OUTPUT_DIR, 'density_count')
             save_data_to_txt(av_vx, 'Vx', timestep, species_label, OUTPUT_DIR, 'Vx')
             save_data_to_txt(av_vy, 'Vy', timestep, species_label, OUTPUT_DIR, 'Vy')
