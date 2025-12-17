@@ -20,12 +20,18 @@ $(LIB_DIR)/libem2d.a :
 main.o : init.o const.o $(LIB_DIR)/libem2d.a
 init.o : const.o $(LIB_DIR)/libem2d.a
 
-############# moment calculation ###############
-moment : $(LIB_DIR)/moment/mom.out
-	$(LIB_DIR)/moment/mom.out ./ ./dat/*_rank*.dat
+############# PSD calculation ###############
+# ここで開始ステップを指定できます
+MIN_STEP = 26000
 
-$(LIB_DIR)/moment/mom.out :
-	cd $(LIB_DIR)/moment ; make
+psd_calc : $(LIB_DIR)/psd/psd.out
+	$(LIB_DIR)/psd/psd.out 160 64 ./ $$( \
+		ls /data/shok/dat/*_rank*.dat | \
+		awk -F/ '{split($$NF, a, "_"); if (a[1] + 0 >= $(MIN_STEP)) print $$0}' \
+	)
+
+$(LIB_DIR)/psd/psd.out :
+	cd $(LIB_DIR)/psd ; make
 ###############################################
 
 ############# PSD calculation ###############
