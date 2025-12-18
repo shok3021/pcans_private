@@ -1,6 +1,6 @@
 program main
 
-  use const, only : nx, ny, nproc
+  use const, only : nx, ny
   use boundary
   use fio
   use particle
@@ -21,8 +21,8 @@ program main
   read(ypos,*)y0
   ! call getarg(3,dir) ! パスを固定するため、引数からの読み込みはコメントアウトまたは削除
 
-!   write(*,*)'No. of processes?'
-!   read(*,*)nproc
+  write(*,*)'No. of processes?'
+  read(*,*)nproc
 
   dx = real(nx, 8) !sampling area in the x direction
   dy = real(ny, 8) !sampling area in the y direction
