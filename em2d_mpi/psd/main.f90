@@ -1,6 +1,5 @@
 program main
 
-  use const
   use boundary
   use fio
   use particle
