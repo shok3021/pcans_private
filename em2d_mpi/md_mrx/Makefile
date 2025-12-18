@@ -37,11 +37,14 @@ $(LIB_DIR)/psd/psd.out :
 ###############################################
 
 ############# PSD calculation RESUME ###############
-# wildcard関数を使って、実際に存在するファイル名だけを取得する
-# sort関数で順番を保証する
-PSD_FILES = $(sort $(wildcard /data/shok/dat/*_2[6-9]???_rank*.dat \
-                              /data/shok/dat/*_[3-4]????_rank*.dat \
-                              /data/shok/dat/*_50000_rank*.dat))
+# ファイル名パターン: 026000_rank=000.dat (6桁ゼロ埋め)
+# 26000-29999 : 02[6-9]???...
+# 30000-49999 : 0[3-4]????...
+# 50000       : 050000...
+
+PSD_FILES = $(sort $(wildcard /data/shok/dat/02[6-9]???_rank=*.dat \
+                              /data/shok/dat/0[3-4]????_rank=*.dat \
+                              /data/shok/dat/050000_rank=*.dat))
 
 psd_calc_resume : $(LIB_DIR)/psd/psd.out
 	$(LIB_DIR)/psd/psd.out 160 64 ./ $(PSD_FILES)
