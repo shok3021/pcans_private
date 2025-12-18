@@ -16,8 +16,8 @@ module const
   integer, parameter :: nproc = 160 ! for thin harris sheet !default: 12       ! NUMBER OF PROCESSORS
 
 !! SETUP FOR SUBROUTINES CALLED IN MAIN PROGRAM
-  integer, parameter :: itmax  = 50000	!NUMBER OF ITERATION
-  integer            :: it0    = 0	!0:INITIAL, NONZERO/9999999: RESTART DATA
+  integer, parameter :: itmax  = 100000	!NUMBER OF ITERATION
+  integer            :: it0    = 25500	!0:INITIAL, NONZERO/9999999: RESTART DATA
   integer, parameter :: intvl1 = 500	!INTERVAL FOR PARTICLES & FIELDS STORAGE
   integer, parameter :: intvl2 = 50	!INTERVAL FOR ENERGY CALC.
   character(len=128) :: dir    = '/data/shok/dat/'	!DIRECTORY FOR OUTPUT
