@@ -1,6 +1,6 @@
 program main
 
-  use const, only : nx, ny
+  use const
   use boundary
   use fio
   use particle
@@ -8,7 +8,7 @@ program main
   implicit none
 
   logical           :: lflag=.true.
-  integer           :: ndata, nproc, idata, irank
+  integer           :: nx, ny, nproc, ndata, idata, irank
   ! character(len=64) :: dir  ! 不要になった場合は削除可能
   character(len=64) :: ifile
   real(8)           :: x0, y0, dx, dy
@@ -24,8 +24,8 @@ program main
   write(*,*)'No. of processes?'
   read(*,*)nproc
 
-  dx = real(nx, 8) !sampling area in the x direction
-  dy = real(ny, 8) !sampling area in the y direction
+  dx = 1601 !sampling area in the x direction
+  dy = 640 !sampling area in the y direction
 
 
   do idata=4,ndata,nproc
