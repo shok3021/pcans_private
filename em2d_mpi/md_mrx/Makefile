@@ -36,6 +36,17 @@ $(LIB_DIR)/psd/psd.out :
 	cd $(LIB_DIR)/psd ; make
 ###############################################
 
+############# PSD calculation RESUME ###############
+# wildcard関数を使って、実際に存在するファイル名だけを取得する
+# sort関数で順番を保証する
+PSD_FILES = $(sort $(wildcard /data/shok/dat/*_2[6-9]???_rank*.dat \
+                              /data/shok/dat/*_[3-4]????_rank*.dat \
+                              /data/shok/dat/*_50000_rank*.dat))
+
+psd_calc_resume : $(LIB_DIR)/psd/psd.out
+	$(LIB_DIR)/psd/psd.out 160 64 ./ $(PSD_FILES)
+####################################################
+
 clean :
 	rm -f $(TARGET) $(OBJS) *.mod dat/*.dat mom/*.dat psd/*.dat
 
