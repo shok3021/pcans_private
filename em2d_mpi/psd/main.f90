@@ -8,7 +8,7 @@ program main
   implicit none
 
   logical           :: lflag=.true.
-  integer           :: ndata, idata, irank
+  integer           :: ndata, nproc, idata, irank
   ! character(len=64) :: dir  ! 不要になった場合は削除可能
   character(len=64) :: ifile
   real(8)           :: x0, y0, dx, dy
