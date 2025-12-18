@@ -1,6 +1,6 @@
 program main
 
-  use const
+  use const, only : nx, ny, nproc
   use boundary
   use fio
   use particle
