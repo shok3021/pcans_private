@@ -1,5 +1,6 @@
 program main
 
+  use const
   use boundary
   use fio
   use particle
@@ -7,7 +8,7 @@ program main
   implicit none
 
   logical           :: lflag=.true.
-  integer           :: nx, ny, nproc, ndata, idata, irank
+  integer           :: ndata, idata, irank
   ! character(len=64) :: dir  ! 不要になった場合は削除可能
   character(len=64) :: ifile
   real(8)           :: x0, y0, dx, dy
@@ -20,11 +21,11 @@ program main
   read(ypos,*)y0
   ! call getarg(3,dir) ! パスを固定するため、引数からの読み込みはコメントアウトまたは削除
 
-  write(*,*)'No. of processes?'
-  read(*,*)nproc
+!   write(*,*)'No. of processes?'
+!   read(*,*)nproc
 
-  dx = nx !sampling area in the x direction
-  dy = ny !sampling area in the y direction
+  dx = real(nx, 8) !sampling area in the x direction
+  dy = real(ny, 8) !sampling area in the y direction
 
 
   do idata=4,ndata,nproc
