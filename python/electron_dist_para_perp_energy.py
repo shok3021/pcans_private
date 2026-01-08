@@ -10,7 +10,7 @@ from multiprocessing import Pool, cpu_count
 # =======================================================
 # 定数・設定
 # =======================================================
-PARAM_FILE_PATH = '/data/shok/dat/init_param.dat'
+PARAM_FILE_PATH = '/data/shok/dat_default/init_param.dat'
 MC2_EV_ELECTRON = (m_e * c**2) / elementary_charge # 0.511 MeV
 
 def load_params():
@@ -28,9 +28,9 @@ def load_params():
 
 P = load_params()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-FIELD_DIR = os.path.join(SCRIPT_DIR, 'extracted_data')
-MOMENT_DIR = os.path.join(SCRIPT_DIR, 'extracted_moments_tensor')
-OUT_DIR = os.path.join(SCRIPT_DIR, 'energy_plots')
+FIELD_DIR = os.path.join(SCRIPT_DIR, 'past_data/default/extracted_data')
+MOMENT_DIR = os.path.join(SCRIPT_DIR, 'past_data/default/extracted_moments_tensor')
+OUT_DIR = os.path.join(SCRIPT_DIR, 'past_data/default/energy_plots')
 
 def load_2d(path):
     try: return pd.read_csv(path, header=None, delimiter=',', engine='c').values

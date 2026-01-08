@@ -185,10 +185,10 @@ def main():
     print(f"--- 処理範囲: 開始={start_step}, 終了={end_step}, 間隔={step_size} ---")
     
     # 環境に応じてこのパスを調整してください
-    data_dir = os.path.join('/data/shok/dat/')
+    data_dir = os.path.join('/data/shok/dat_default/')
     
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'extracted_data') 
+    OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'past_data/default/extracted_data') 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     print(f"--- 出力先ディレクトリ: {OUTPUT_DIR} ---")
     

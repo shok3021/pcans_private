@@ -6,7 +6,7 @@ import sys
 # 設定
 # =======================================================
 IS_RAW_DATA_NORMALIZED = True
-PARAM_FILE_PATH = os.path.join('/data/shok/dat/init_param.dat')
+PARAM_FILE_PATH = os.path.join('/data/shok/dat_default/init_param.dat')
 
 def load_grid_params(param_filepath):
     params = {'nx': 1601, 'ny': 640, 'delx': 0.2}
@@ -97,8 +97,8 @@ def main():
     start, end, step = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
     fid1, fid2 = sys.argv[4], sys.argv[5]
     
-    data_dir = '/data/shok/psd/'
-    out_dir = os.path.join(os.path.dirname(__file__), 'extracted_moments_tensor')
+    data_dir = '/data/shok/psd_default/'
+    out_dir = os.path.join(os.path.dirname(__file__), 'past_data/default/extracted_moments_tensor')
     os.makedirs(out_dir, exist_ok=True)
 
     for ts_val in range(start, end + step, step):
